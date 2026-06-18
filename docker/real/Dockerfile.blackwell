@@ -28,7 +28,7 @@ RUN cd /Isaac-GR00T && \
 RUN cd /Isaac-GR00T/gr00t/eval/real_robot/SO100 && \
     python3 -m pip install -e . --break-system-packages
 RUN python3 -m pip uninstall -y torch torchvision torchaudio && python3 -m pip install --pre torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cu130
-RUN export MAX_JOBS=2 && python3 -m pip install flash-attn --no-build-isolation --no-cache-dir
+RUN export MAX_JOBS=1 && python3 -m pip install flash-attn --no-build-isolation --no-cache-dir
 RUN python3 -m pip install feetech-servo-sdk
 
 RUN update-alternatives --install /usr/bin/python python /usr/bin/python3.10 1

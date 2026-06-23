@@ -7,12 +7,12 @@
 
 ## System Requirements
 
-| Item | Spec |
-|---|---|
-| GPU | NVIDIA Blackwell (RTX 5060 Pro) |
-| CUDA | 13.0 |
-| OS | Ubuntu 22.04+ |
-| Python | 3.11 (via uv) |
+| Item            | Spec                                  |
+| --------------- | ------------------------------------- |
+| GPU             | NVIDIA Blackwell (RTX 5060 Pro)       |
+| CUDA            | 13.0                                  |
+| OS              | Ubuntu 22.04+                         |
+| Python          | 3.11 (via uv)                         |
 | Package manager | [uv](https://github.com/astral-sh/uv) |
 
 ---
@@ -106,9 +106,6 @@ uv pip install --python ~/env_isaaclab/bin/python pyzmq
 ## Step 5 — Install the Workshop Package
 
 ```bash
-# Remove stale egg-info if it was created by Docker (owned by root)
-sudo rm -rf ~/Sim-to-Real-SO-101-Workshop/source/sim_to_real_so101.egg-info
-
 uv pip install --python ~/env_isaaclab/bin/python \
     -e ~/Sim-to-Real-SO-101-Workshop/source/sim_to_real_so101/
 ```
@@ -167,29 +164,16 @@ lerobot_push_dataset --repo_id <your_hf_id/dataset_name>
 
 ## Key Paths
 
-| Item | Path |
-|---|---|
-| Virtual environment | `~/env_isaaclab` |
-| Isaac Sim | installed inside `~/env_isaaclab` via pip |
-| Isaac Lab | `~/IsaacLab` |
-| LeRobot | `~/lerobot` |
-| Workshop source | `~/Sim-to-Real-SO-101-Workshop/source/sim_to_real_so101` |
-| Datasets output | `~/Sim-to-Real-SO-101-Workshop/datasets` |
-| Captured images | `~/Sim-to-Real-SO-101-Workshop/outputs/captured_images` |
+| Item                | Path                                                     |
+| ------------------- | -------------------------------------------------------- |
+| Virtual environment | `~/env_isaaclab`                                         |
+| Isaac Sim           | installed inside `~/env_isaaclab` via pip                |
+| Isaac Lab           | `~/IsaacLab`                                             |
+| LeRobot             | `~/lerobot`                                              |
+| Workshop source     | `~/Sim-to-Real-SO-101-Workshop/source/sim_to_real_so101` |
+| Datasets output     | `~/Sim-to-Real-SO-101-Workshop/datasets`                 |
+| Captured images     | `~/Sim-to-Real-SO-101-Workshop/outputs/captured_images`  |
 
----
+```
 
-## Troubleshooting
-
-### CUDA error 999 on startup
-IOMMU is enabled. Follow Step 1 and reboot.
-
-### `No module named 'pxr'` during import
-Expected — Isaac Sim modules require `SimulationApp` to be initialised first.
-The workshop scripts handle this correctly; do not import isaaclab before `AppLauncher`.
-
-### `egg-info` permission error on install
-The directory was created by Docker as root. Run:
-```bash
-sudo rm -rf ~/Sim-to-Real-SO-101-Workshop/source/sim_to_real_so101.egg-info
 ```

@@ -15,6 +15,7 @@ sudo chmod 666 /dev/ttyACM0
 sudo chmod 666 /dev/ttyACM2
 
 sudo chmod -R 777 /home/max/.cache/huggingface/lerobot/
+sudo chmod -R 777 /home/air-420/.cache/huggingface/lerobot/
 
 lerobot-calibrate \
     --teleop.type=so101_leader \
@@ -57,3 +58,11 @@ lerobot-teleoperate \
       "fps": 30
     }
   }'
+
+lerobot_agent --task Lerobot-So101-Teleop-Vials-To-Rack-DR
+
+lerobot_agent --task Lerobot-So101-Teleop-Vials-To-Rack-DR \
+    --repo_id ${HF_USER}/so101_teleop_vials \
+    --repo_root $(pwd)/datasets/so101_teleop_vials \
+    --task_name "Pick up the vial and place it in the rack"
+```

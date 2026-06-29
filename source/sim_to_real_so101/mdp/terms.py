@@ -58,11 +58,17 @@ def any_vial_grasped(
     num_envs = env.num_envs
     device = env.device
     
-    # Initialize state trackers on first call
-    if not hasattr(any_vial_grasped, "_prev_grasped"):
-        any_vial_grasped._prev_grasped = torch.zeros(num_envs, dtype=torch.bool, device=device)
-    if not hasattr(any_vial_grasped, "_is_holding"):
-        any_vial_grasped._is_holding = torch.zeros(num_envs, dtype=torch.bool, device=device)
+    # Per-contact-sensor state, keyed by sensor name, so multiple grippers
+    # (e.g. dual-arm left/right) don't clobber each other's grasp state.
+    key = contact_sensor_cfg.name
+    if not hasattr(any_vial_grasped, "_state"):
+        any_vial_grasped._state = {}
+    if key not in any_vial_grasped._state:
+        any_vial_grasped._state[key] = {
+            "prev_grasped": torch.zeros(num_envs, dtype=torch.bool, device=device),
+            "is_holding": torch.zeros(num_envs, dtype=torch.bool, device=device),
+        }
+    st = any_vial_grasped._state[key]
     
     # Check warmup: no vial can be grasped in the first N steps
     current_step = env.episode_length_buf
@@ -70,8 +76,8 @@ def any_vial_grasped(
     
     # Reset holding state for environments that just reset (step 0 or 1)
     just_reset = current_step <= 1
-    any_vial_grasped._is_holding[just_reset] = False
-    any_vial_grasped._prev_grasped[just_reset] = False
+    st["is_holding"][just_reset] = False
+    st["prev_grasped"][just_reset] = False
     
     # Get contact sensor
     contact_sensor: ContactSensor = env.scene[contact_sensor_cfg.name]
@@ -102,20 +108,20 @@ def any_vial_grasped(
         any_contact = any_contact | has_contact_with_vial
         
         # New grasp: contact + lifted + not already holding
-        new_grasp = new_grasp | (has_contact_with_vial & vial_is_lifted & (~any_vial_grasped._is_holding))
+        new_grasp = new_grasp | (has_contact_with_vial & vial_is_lifted & (~st["is_holding"]))
     
     # Update holding state with hysteresis:
     # - Start holding: new grasp detected (contact + lifted)
     # - Keep holding: was holding AND still have contact
     # - Stop holding: was holding AND lost contact
-    was_holding = any_vial_grasped._is_holding.clone()
-    any_vial_grasped._is_holding = (was_holding & any_contact) | new_grasp
+    was_holding = st["is_holding"].clone()
+    st["is_holding"] = (was_holding & any_contact) | new_grasp
     
     # Apply warmup mask
-    is_grasped = any_vial_grasped._is_holding & (~in_warmup)
+    is_grasped = st["is_holding"] & (~in_warmup)
     
     # Debug: print state transitions
-    prev = any_vial_grasped._prev_grasped
+    prev = st["prev_grasped"]
     just_grasped = is_grasped & (~prev)
     just_released = (~is_grasped) & prev
     
@@ -128,7 +134,7 @@ def any_vial_grasped(
         print(f"[RELEASE] Vial released in env(s): {env_ids}")
     
     # Update previous state
-    any_vial_grasped._prev_grasped = is_grasped.clone()
+    st["prev_grasped"] = is_grasped.clone()
     
     # Return as float tensor with shape (num_envs, 1) for observation
     return is_grasped.float().unsqueeze(-1)
@@ -190,25 +196,32 @@ def vial_placed_on_rack(
     device = env.device
     num_vials = len(vials)
 
-    # Initialize state trackers on first call
-    if not hasattr(vial_placed_on_rack, "_grasp_history"):
-        vial_placed_on_rack._grasp_history = torch.zeros(
-            num_envs, num_vials, grasp_history_window, dtype=torch.bool, device=device
-        )
-        vial_placed_on_rack._history_idx = 0
-        vial_placed_on_rack._prev_placed = torch.zeros(num_envs, dtype=torch.bool, device=device)
-        vial_placed_on_rack._vial_placed_flags = torch.zeros(
-            num_envs, num_vials, dtype=torch.bool, device=device
-        )
+    # Per-contact-sensor state, keyed by sensor name, so dual-arm left/right
+    # don't share grasp-history / placed-flags.
+    key = contact_sensor_cfg.name
+    if not hasattr(vial_placed_on_rack, "_state"):
+        vial_placed_on_rack._state = {}
+    if key not in vial_placed_on_rack._state:
+        vial_placed_on_rack._state[key] = {
+            "grasp_history": torch.zeros(
+                num_envs, num_vials, grasp_history_window, dtype=torch.bool, device=device
+            ),
+            "history_idx": 0,
+            "prev_placed": torch.zeros(num_envs, dtype=torch.bool, device=device),
+            "vial_placed_flags": torch.zeros(
+                num_envs, num_vials, dtype=torch.bool, device=device
+            ),
+        }
+    st = vial_placed_on_rack._state[key]
 
     current_step = env.episode_length_buf
     in_warmup = current_step < warmup_steps
 
     just_reset = current_step <= 1
     if just_reset.any():
-        vial_placed_on_rack._grasp_history[just_reset] = False
-        vial_placed_on_rack._prev_placed[just_reset] = False
-        vial_placed_on_rack._vial_placed_flags[just_reset] = False
+        st["grasp_history"][just_reset] = False
+        st["prev_placed"][just_reset] = False
+        st["vial_placed_flags"][just_reset] = False
 
     # Get contact sensor for grasp detection
     contact_sensor: ContactSensor = env.scene[contact_sensor_cfg.name]
@@ -235,8 +248,8 @@ def vial_placed_on_rack(
 
         # --- Grasp detection ---
         vial_grasped_now = contact_per_filter[:, vial_idx] > force_threshold
-        vial_placed_on_rack._grasp_history[:, vial_idx, vial_placed_on_rack._history_idx] = vial_grasped_now
-        vial_was_grasped_recently = vial_placed_on_rack._grasp_history[:, vial_idx, :].any(dim=1)
+        st["grasp_history"][:, vial_idx, st["history_idx"]] = vial_grasped_now
+        vial_was_grasped_recently = st["grasp_history"][:, vial_idx, :].any(dim=1)
 
         # --- Vertical orientation check ---
         # Transform vial's local Z axis into world frame.  A vial sitting in a
@@ -266,26 +279,26 @@ def vial_placed_on_rack(
             & vial_was_grasped_recently
             & (~vial_grasped_now)
             & (~in_warmup)
-            & (~vial_placed_on_rack._vial_placed_flags[:, vial_idx])
+            & (~st["vial_placed_flags"][:, vial_idx])
         )
 
         newly_placed = vial_is_placed
         if newly_placed.any():
             env_ids = torch.where(newly_placed)[0].tolist()
             print(f"[RACK] {vial_name} placed in rack in env(s): {env_ids}")
-            vial_placed_on_rack._vial_placed_flags[:, vial_idx] = (
-                vial_placed_on_rack._vial_placed_flags[:, vial_idx] | newly_placed
+            st["vial_placed_flags"][:, vial_idx] = (
+                st["vial_placed_flags"][:, vial_idx] | newly_placed
             )
 
         any_vial_newly_placed = any_vial_newly_placed | newly_placed
 
     # Advance history ring buffer index
-    vial_placed_on_rack._history_idx = (vial_placed_on_rack._history_idx + 1) % grasp_history_window
+    st["history_idx"] = (st["history_idx"] + 1) % grasp_history_window
 
-    any_placed = vial_placed_on_rack._vial_placed_flags.any(dim=1) & (~in_warmup)
+    any_placed = st["vial_placed_flags"].any(dim=1) & (~in_warmup)
 
-    prev = vial_placed_on_rack._prev_placed
-    vial_placed_on_rack._prev_placed = any_placed.clone()
+    prev = st["prev_placed"]
+    st["prev_placed"] = any_placed.clone()
 
     return any_placed.float().unsqueeze(-1)
 

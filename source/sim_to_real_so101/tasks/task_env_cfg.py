@@ -100,13 +100,13 @@ camera_object = TiledCameraCfg(
 class SO101TaskSceneCfg(LerobotSo101BaseSceneCfg):
 
     # ── 燈箱 USD ──
-    # lightbox-simple.usd 是一個預先做好的「攝影棚」模型，
-    # 裡面包含牆壁、面板燈（RectLight）和外部相機的安裝座（camera_mount）。
+    # lightbox-egocam.usd 是預先做好的「攝影棚」模型（已把牆上 D455 換成置中 ego D435i），
+    # 裡面包含牆壁、面板燈（RectLight）和置中的 ego 相機（ego_cam，reference RSD435i）。
     # 把整個 USD 載入後，我們可以直接引用其內部的子 prim（如 LightBox/RectLight）
     lightstudio = AssetBaseCfg(
         prim_path="{ENV_REGEX_NS}/LightStudio",
         spawn=sim_utils.UsdFileCfg(
-            usd_path=f"{assets_path}/usd/lightbox-simple.usd",
+            usd_path=f"{assets_path}/usd/lightbox-egocam.usd",
         ),
         # 稍微往後移動並墊高，讓機器人位於燈箱正中央
         init_state=AssetBaseCfg.InitialStateCfg(pos=(-0.1, 0, 0.0257)),
@@ -144,20 +144,26 @@ class SO101TaskSceneCfg(LerobotSo101BaseSceneCfg):
         ),
     )
 
-    # ── Wrist Camera（夾爪視角相機）──
-    # 掛在機器人夾爪（gripper）prim 下，跟著手臂移動
-    # offset 定義相機在 gripper 座標系下的偏移位置和朝向角度
+    # ── Wrist Camera（夾爪視角相機，D435i）──
+    # 指向 d435i USD 內已烤好的 Camera prim（位姿/朝向已在 USD 內處理，180° X 修正讓它沿 optical +Z 朝前）
+    # spawn=None：直接用 USD 既有的 Camera prim，不再生成（與下方 camera_center 同模式）
+    # 不覆寫 offset → 用 camera_object 預設的 identity offset，相機位姿完全由 USD 決定
     camera_ego = camera_object.replace()
-    camera_ego.prim_path = "{ENV_REGEX_NS}/Robot/gripper/gripper_cam"
-    camera_ego.offset.pos = (-0.005, 0.06, -0.062)   # 相機中心位置（公尺）
-    camera_ego.offset.rot = euler_angles_to_quat(np.array([-45, 0, 0]), degrees=True)  # 俯角 45°
+    camera_ego.prim_path = (
+        "{ENV_REGEX_NS}/Robot/gripper/realsense_d435i/camera_link/"
+        "camera_color_frame/camera_color_optical_frame/Camera"
+    )
+    camera_ego.spawn = None
 
-    # ── 外部固定相機（D455 模擬）──
-    # 掛在燈箱 USD 內的 camera_mount 節點下，位置由燈箱 USD 決定
-    # spawn=None 表示相機 prim 已經在 USD 裡定義好了，直接引用即可
-    camera_external_D455 = camera_object.replace()
-    camera_external_D455.prim_path = "{ENV_REGEX_NS}/LightStudio/LightBox/camera_mount/rsd455/RSD455/Camera_OmniVision_OV9782_Right"
-    camera_external_D455.spawn = None  # USD 裡已有此相機 prim，不需要再生成
+    # ── 中央 ego 相機（D435i，置中俯視兩臂工作區）──
+    # 取代原本掛在牆上的 D455。相機在燈箱 USD 內的 ego_cam 節點下（reference RSD435i.usd），
+    # 位置/視角由燈箱 USD 決定（在 GUI 調），spawn=None 直接引用既有 Camera prim。
+    camera_center = camera_object.replace()
+    camera_center.prim_path = (
+        "{ENV_REGEX_NS}/LightStudio/LightBox/ego_cam/camera_link/"
+        "camera_color_frame/camera_color_optical_frame/Camera"
+    )
+    camera_center.spawn = None
 
 
 # ============================================================
@@ -202,15 +208,14 @@ class TaskEventCfg(EventCfg):
         },
     )
 
-    # ── 外部相機位姿隨機化 ──
-    # 小幅度隨機移動並旋轉外部相機的安裝座（camera_mount），
-    # 模擬真實世界中相機固定不精確的情況
-    # 注意：這裡用 prim_path_pattern 而非 asset_cfg，因為安裝座不是獨立 Asset
-    reset_camera_external_pose = EventTerm(
+    # ── 中央 ego 相機位姿隨機化 ──
+    # 小幅度隨機移動並旋轉 ego_cam 節點，模擬真實世界中相機固定不精確的情況
+    # 注意：這裡用 prim_path_pattern 而非 asset_cfg，因為 ego_cam 不是獨立 Asset
+    reset_camera_center_pose = EventTerm(
         func=randomize_camera_pose,
         mode="reset",
         params={
-            "prim_path_pattern": "{ENV_REGEX_NS}/LightStudio/LightBox/camera_mount",
+            "prim_path_pattern": "{ENV_REGEX_NS}/LightStudio/LightBox/ego_cam",
             "pos_range": {
                 "x": (-0.02, 0.02),  # ±2 cm
                 "y": (-0.02, 0.02),
@@ -264,29 +269,29 @@ class TaskObservationsCfg(ObservationsCfg):
             },
         )
 
-        # ── 外部固定相機（D455）影像 ──
+        # ── 中央 ego 相機（D435i，置中俯視）影像 ──
 
-        rgb_external_D455 = ObsTerm(
+        rgb_center = ObsTerm(
             func=image,
             params={
-                "sensor_cfg": SceneEntityCfg("camera_external_D455"),
+                "sensor_cfg": SceneEntityCfg("camera_center"),
                 "data_type": "rgb",
                 "normalize": False,
             },
         )
 
-        depth_external_D455 = ObsTerm(
+        depth_center = ObsTerm(
             func=image,
             params={
-                "sensor_cfg": SceneEntityCfg("camera_external_D455"),
+                "sensor_cfg": SceneEntityCfg("camera_center"),
                 "data_type": "depth",
             },
         )
 
-        instance_id_seg_external_D455 = ObsTerm(
+        instance_id_seg_center = ObsTerm(
             func=image_raw,
             params={
-                "sensor_cfg": SceneEntityCfg("camera_external_D455"),
+                "sensor_cfg": SceneEntityCfg("camera_center"),
                 "data_type": "instance_id_segmentation_fast",
             },
         )

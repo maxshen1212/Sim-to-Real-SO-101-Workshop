@@ -57,6 +57,36 @@ gym.register(
     },
 )
 
+# ── Phase 2：雙臂 base（無相機/任務，先驗證兩臂站得住）──
+gym.register(
+    id="Lerobot-So101-Dual-Base",
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.so101_dual_env_cfg:SO101DualTeleopEnvCfg",
+    },
+)
+
+# ── Phase 3：雙臂 + 三相機（左腕/右腕/中央 ego），無任務物件 ──
+gym.register(
+    id="Lerobot-So101-Dual-Task",
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.so101_dual_task_env_cfg:SO101DualTaskEnvCfg",
+    },
+)
+
+# ── Phase 4：雙臂 vials → 中央架（左右各取自己半邊；遙操作錄製 base）──
+gym.register(
+    id="Lerobot-So101-Dual-Vials-To-Rack",
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.so101_dual_vials_env_cfg:SO101DualVialsEnvCfg",
+    },
+)
+
 gym.register(
     id="Lerobot-So101-Teleop-Vials-To-Rack",
     entry_point="isaaclab.envs:ManagerBasedRLEnv",

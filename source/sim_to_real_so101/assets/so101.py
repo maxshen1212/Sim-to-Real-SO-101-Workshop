@@ -25,7 +25,7 @@ here = os.path.dirname(os.path.abspath(__file__))
 
 SO101_CFG = ArticulationCfg(
     spawn=sim_utils.UsdFileCfg(
-        usd_path=f"{here}/usd/SO-ARM101-USD.usd",
+        usd_path=f"{here}/usd/Robot_usd/SO-ARM101-USD-d435i-physics.usd",
         activate_contact_sensors=False,
         rigid_props=sim_utils.RigidBodyPropertiesCfg(
             disable_gravity=False,
@@ -112,3 +112,23 @@ S0101_NO_CAMERA_CFG.spawn.usd_path = f"{here}/usd/SO-ARM101-USD-NO-CAMERA.usd"
 
 S0101_CONTACT_GRASP_CFG = SO101_CFG.copy()
 S0101_CONTACT_GRASP_CFG.spawn.activate_contact_sensors = True
+
+
+# ============================================================
+# 雙臂 config（Phase 2）
+# 兩臂並排、皆面向 +x（沿用 SO101_CFG 的 rot=90°Z 與初始關節姿勢）；
+# 間距 0.30 m：左臂 base y=+0.15、右臂 y=−0.15（ROADMAP 定案、真機驗證過 handoff 可行）。
+# 沿用帶相機+physics 的 d435i USD（base 場景不放相機感測器，幾何照樣帶著）。
+# ============================================================
+SO101_DUAL_LEFT_CFG = SO101_CFG.copy()
+SO101_DUAL_LEFT_CFG.init_state.pos = (-0.05, 0.15, 0)
+
+SO101_DUAL_RIGHT_CFG = SO101_CFG.copy()
+SO101_DUAL_RIGHT_CFG.init_state.pos = (-0.05, -0.15, 0)
+
+# 帶接觸感測的雙臂版本（任務層用，偵測各臂夾爪抓取試管）
+SO101_DUAL_LEFT_CONTACT_CFG = SO101_DUAL_LEFT_CFG.copy()
+SO101_DUAL_LEFT_CONTACT_CFG.spawn.activate_contact_sensors = True
+
+SO101_DUAL_RIGHT_CONTACT_CFG = SO101_DUAL_RIGHT_CFG.copy()
+SO101_DUAL_RIGHT_CONTACT_CFG.spawn.activate_contact_sensors = True

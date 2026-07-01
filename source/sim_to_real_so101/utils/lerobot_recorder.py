@@ -44,7 +44,17 @@ class LeRobotRecorder:
         save_mp4: bool = False,
         depth: bool = False, # not saved in lerobot dataset
         instance_id_seg: bool = False, # not saved in lerobot dataset
+        joint_names: list[str] = None,  # state/action 關節名；None=單臂6關節，雙臂傳12個(left_*/right_*)
     ):
+
+        # 單臂預設 6 關節；雙臂由 lerobot_agent_dual 傳入 12 個
+        if joint_names is None:
+            joint_names = [
+                "shoulder_pan.pos", "shoulder_lift.pos", "elbow_flex.pos",
+                "wrist_flex.pos", "wrist_roll.pos", "gripper.pos",
+            ]
+        self.joint_names = joint_names
+        self.state_dim = len(joint_names)
 
         self.fps = fps
         self.dt = 1 / self.fps
@@ -63,15 +73,8 @@ class LeRobotRecorder:
             "observation.state": {
                 "dtype": "float32",
                 "fps": self.fps,
-                "shape": (6,),
-                "names": [
-                    "shoulder_pan.pos",
-                    "shoulder_lift.pos",
-                    "elbow_flex.pos",
-                    "wrist_flex.pos",
-                    "wrist_roll.pos",
-                    "gripper.pos",
-                ],
+                "shape": (self.state_dim,),
+                "names": self.joint_names,
             }
         }
 
@@ -93,16 +96,9 @@ class LeRobotRecorder:
         self.LEADER_ACTION_FEATURES = {
             "action": {
                 "dtype": "float32",
-                "shape": (6,),
+                "shape": (self.state_dim,),
                 "fps": self.fps,
-                "names": [
-                    "shoulder_pan.pos",
-                    "shoulder_lift.pos",
-                    "elbow_flex.pos",
-                    "wrist_flex.pos",
-                    "wrist_roll.pos",
-                    "gripper.pos",
-                ],
+                "names": self.joint_names,
             }
         }
 
@@ -192,10 +188,10 @@ class LeRobotRecorder:
 
     def allocate_buffers(self):
         self.action_buffers_tensor = torch.zeros(
-            (self.capcity, 6), dtype=torch.float32, device=self.device
+            (self.capcity, self.state_dim), dtype=torch.float32, device=self.device
         )
         self.observation_buffer_tensor = torch.zeros(
-            (self.capcity, 6), dtype=torch.float32, device=self.device
+            (self.capcity, self.state_dim), dtype=torch.float32, device=self.device
         )
 
         for camera_name in self.cameras.keys():

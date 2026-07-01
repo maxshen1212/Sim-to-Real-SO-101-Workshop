@@ -189,5 +189,10 @@ lerobot-calibrate --teleop.type=so101_leader --teleop.port=$TELEOP_PORT_RIGHT --
 
 lerobot_agent_dual --task Lerobot-So101-Dual-Vials-To-Rack
 
+lerobot_agent_dual --task Lerobot-So101-Dual-Vials-To-Rack \
+    --repo_id ${HF_USER}/so101_dual_vials \
+    --repo_root $(pwd)/datasets/so101_dual_vials \
+    --task_name "left arm places left vials into center rack, right arm places right vials"
+
 
 ```

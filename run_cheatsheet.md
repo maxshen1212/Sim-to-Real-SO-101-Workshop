@@ -74,14 +74,10 @@ lerobot_agent --task Lerobot-So101-Teleop-Vials-To-Rack-DR \
 雙臂用**兩支 SO-101 leader** 驅動 sim,收 12 維(`left_*`/`right_*`)state/action + 3 相機。
 所有錄製只寫**本機**,上傳是最後手動一步。
 
-## 0. 進環境 + 設共用變數
+## 0. 進環境
 
 ```bash
 source ~/env_isaaclab/bin/activate
-
-export HF_USER=chihhan1212                 # 你的 HF 帳號
-export DATASET=dual_vials                  # dataset 名稱(隨你取)
-export DATASET_ROOT=$(pwd)/datasets/$DATASET   # 本機存放路徑(錄製 / 上傳都用它)
 ```
 
 ## 1. 找 port + 授權(每次插拔都會變,要重跑)
@@ -122,18 +118,18 @@ lerobot_agent_dual --task Lerobot-So101-Dual-Vials-To-Rack
 ```bash
 lerobot_agent_dual \
   --task Lerobot-So101-Dual-Vials-To-Rack \
-  --repo_id  $HF_USER/$DATASET \
-  --repo_root $DATASET_ROOT \
+  --repo_id  ChihHanShen/bimanual-so101-pickvials \
+  --repo_root $(pwd)/datasets/bimanual-so101-pickvials \
   --task_name "Pick up the vials and place them into the rack"
 ```
 
 錄製時鍵盤(焦點要在 Isaac Sim 視窗):
 
-| 鍵 | 動作 |
-| --- | --- |
-| **S** | 起 / 停錄製(切換)。按 S 開始收 frame,再按 S **停止並存檔**(一段 = 一個 episode)|
-| **C** | **取消**當前這段(丟棄不存,錄壞用這個);只有錄製中有效 |
-| **R** | reset 場景(換佈局)。**R 會先 stop_recording** → 正在錄的話會**先存檔再 reset** |
+| 鍵    | 動作                                                                            |
+| ----- | ------------------------------------------------------------------------------- |
+| **S** | 起 / 停錄製(切換)。按 S 開始收 frame,再按 S **停止並存檔**(一段 = 一個 episode) |
+| **C** | **取消**當前這段(丟棄不存,錄壞用這個);只有錄製中有效                            |
+| **R** | reset 場景(換佈局)。**R 會先 stop_recording** → 正在錄的話會**先存檔再 reset**  |
 
 - 一個 episode = `S開 → 操作 → S停`。看到 log `Episode N saved.` 才代表真的寫完。
 - 丟掉壞的 + 換佈局 → 先 **C** 再 **R**(直接按 R 會把壞的存進去)。
@@ -142,10 +138,11 @@ lerobot_agent_dual \
 ## 5. 上傳到 HuggingFace(手動、獨立步驟)
 
 ```bash
-huggingface-cli login                       # 第一次才要
+hf auth login                       # 第一次才要
 
 # 注意旗標:--repo-id / --root(連字號),--root 要對上錄製的 $DATASET_ROOT
-lerobot_push_dataset --repo-id $HF_USER/$DATASET --root $DATASET_ROOT
+lerobot_push_dataset --repo-id ChihHanShen/bimanual-so101-pickvials --root $(pwd)/datasets/bimanual-so101-pickvials
+```
 # 私有資料集加 --private
 ```
 
@@ -156,13 +153,13 @@ lerobot_push_dataset --repo-id $HF_USER/$DATASET --root $DATASET_ROOT
 
 ```bash
 # 資料夾長相
-ls $DATASET_ROOT              # 應有 meta/ data/ videos/
-cat $DATASET_ROOT/meta/info.json | head
+ls $(pwd)/datasets/bimanual-so101-pickvials              # 應有 meta/ data/ videos/
+cat $(pwd)/datasets/bimanual-so101-pickvials/meta/info.json | head
 
 # 用 LeRobot 讀出來驗特徵
 python - <<PY
 from lerobot.datasets.lerobot_dataset import LeRobotDataset
-ds = LeRobotDataset(repo_id="$HF_USER/$DATASET", root="$DATASET_ROOT")
+ds = LeRobotDataset(repo_id="ChihHanShen/bimanual-so101-pickvials", root="$(pwd)/datasets/bimanual-so101-pickvials")
 print("episodes:", ds.meta.total_episodes, "frames:", ds.meta.total_frames, "fps:", ds.meta.fps)
 for k, v in ds.meta.features.items():
     print(k, v.get("shape"), v.get("names"))
@@ -170,6 +167,7 @@ PY
 ```
 
 驗這幾點:
+
 - `observation.state` 與 `action` 形狀 **(12,)**、`names` 為 6 個 `left_*` + 6 個 `right_*`。
 - 有 **3 個** `observation.images.*`(`wrist_left` / `wrist_right` / `center`),480×640。
 - `fps=30`、`episodes` = 你錄的集數。

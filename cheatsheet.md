@@ -68,7 +68,7 @@ uv pip install --python ~/env_isaaclab/bin/python \
 The workshop requires a specific LeRobot commit (`e670ac5d`).
 
 ```bash
-git clone https://github.com/huggingface/lerobot.git ~/lerobot
+git clone https://github.com/maxshen1212/lerobot.git ~/lerobot
 cd ~/lerobot && git checkout e670ac5daf9b76
 
 uv pip install --python ~/env_isaaclab/bin/python --no-deps -e .
@@ -175,6 +175,7 @@ lerobot_push_dataset --repo_id <your_hf_id/dataset_name>
 | Captured images     | `~/Sim-to-Real-SO-101-Workshop/outputs/captured_images`  |
 
 ```bash
+source ~/env_isaaclab/bin/activate
 
 lerobot-find-port          # 找左臂,假設 /dev/ttyACM0
 lerobot-find-port          # 找右臂,假設 /dev/ttyACM1
@@ -189,10 +190,7 @@ lerobot-calibrate --teleop.type=so101_leader --teleop.port=$TELEOP_PORT_RIGHT --
 
 lerobot_agent_dual --task Lerobot-So101-Dual-Vials-To-Rack
 
-lerobot_agent_dual --task Lerobot-So101-Dual-Vials-To-Rack \
-    --repo_id ${HF_USER}/so101_dual_vials \
-    --repo_root $(pwd)/datasets/so101_dual_vials \
-    --task_name "left arm places left vials into center rack, right arm places right vials"
+zero_agent --task Lerobot-So101-Dual-Vials-To-Rack
 
 
 ```

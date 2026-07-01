@@ -173,24 +173,3 @@ lerobot_push_dataset --repo_id <your_hf_id/dataset_name>
 | Workshop source     | `~/Sim-to-Real-SO-101-Workshop/source/sim_to_real_so101` |
 | Datasets output     | `~/Sim-to-Real-SO-101-Workshop/datasets`                 |
 | Captured images     | `~/Sim-to-Real-SO-101-Workshop/outputs/captured_images`  |
-
-```bash
-source ~/env_isaaclab/bin/activate
-
-lerobot-find-port          # 找左臂,假設 /dev/ttyACM0
-lerobot-find-port          # 找右臂,假設 /dev/ttyACM1
-
-export TELEOP_PORT_LEFT=/dev/ttyACM0   TELEOP_ID_LEFT=leader_left
-export TELEOP_PORT_RIGHT=/dev/ttyACM1  TELEOP_ID_RIGHT=leader_right
-sudo chmod 666 $TELEOP_PORT_LEFT $TELEOP_PORT_RIGHT
-
-# 各校正一次(id 要不同)
-lerobot-calibrate --teleop.type=so101_leader --teleop.port=$TELEOP_PORT_LEFT  --teleop.id=$TELEOP_ID_LEFT
-lerobot-calibrate --teleop.type=so101_leader --teleop.port=$TELEOP_PORT_RIGHT --teleop.id=$TELEOP_ID_RIGHT
-
-lerobot_agent_dual --task Lerobot-So101-Dual-Vials-To-Rack
-
-zero_agent --task Lerobot-So101-Dual-Vials-To-Rack
-
-
-```

@@ -17,6 +17,7 @@
 | **佈局** | 兩臂並排、皆面向 +x;左臂 base (-0.05, +0.15, 0)、右臂 (-0.05, -0.15, 0) |
 | **間距** | 0.30 m(左臂 y=+0.15、右臂 y=−0.15)✅ 真機已驗證 |
 | **相機** | 3 台:左腕、右腕、ego(燈箱開口置中俯視),收 RGB + depth |
+| **ego 相機(已量測確認 2026-07-01)** | world 位置 ≈ **(-0.23, 0.03, 0.53)**(離地高 ~0.53m),朝墊子中心 (0.22,0) 俯視約 45°;intrinsics focal 15.245mm、aperture 20.955×15.716 → **HFOV≈69°**(= D435 color)。ego_cam 相對 LightBox 的 local:translate (0, 0.4, 0.5)、euler (45°,0,-90°)。畫面已在 `camera_center` 目視確認**置中正確** |
 | **depth** | 只存檔備用,**不進 policy** |
 | **工作墊** | mat.usda,world x[0.068, 0.372](前後 0.3048m)× y[-0.229, 0.229](左右 0.4572m),中心 (0.22, 0) |
 | **語言指令** | **沿用單臂那句**(embodiment-agnostic):`"pick up the vials and place them into the rack"`。不寫「左手做什麼右手做什麼」,雙臂差異靠 embodiment tag + 12 維 state 表達 |
@@ -201,3 +202,5 @@ Phase 8  Co-training + 部署
 - 2026-07-01 — P4A 錄製程式建好(12 維 + 3 相機,`left_*/right_*` 命名);釐清任務語意(不綁左右分邊、數量不限);
   規劃選項 2(數量隨機 1~4 支)為 Phase 4B;確認選項 1↔2 dataset schema 相容可 append;
   試管初始位置往近側調(x 0.23→0.18)
+- 2026-07-01 — 調整並目視確認 ego 中央相機:world (-0.23,0.03,0.53)、高 ~0.53m、俯視墊子中心、HFOV≈69°(D435);
+  `camera_center` 畫面置中正確,參數記入上表

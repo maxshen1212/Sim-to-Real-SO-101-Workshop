@@ -119,11 +119,13 @@ class SO101DualVialsSceneCfg(SO101DualTaskSceneCfg):
     )
 
     # ── 左半邊 2 支（左臂負責，y>0）──
-    vial_left_1 = _vial_at("Vial_Left_1", 0.23, 0.10)
-    vial_left_2 = _vial_at("Vial_Left_2", 0.23, 0.18)
+    # x=0.18：比墊子中線(0.22)略靠近機器人，落在墊子近半邊，且比架子(0.22)近，
+    # 形成「前面拿試管 → 放後面中央架」的動線；避免和架子擠在同一條深度線上。
+    vial_left_1 = _vial_at("Vial_Left_1", 0.18, 0.10)
+    vial_left_2 = _vial_at("Vial_Left_2", 0.18, 0.18)
     # ── 右半邊 2 支（右臂負責，y<0）──
-    vial_right_1 = _vial_at("Vial_Right_1", 0.23, -0.10)
-    vial_right_2 = _vial_at("Vial_Right_2", 0.23, -0.18)
+    vial_right_1 = _vial_at("Vial_Right_1", 0.18, -0.10)
+    vial_right_2 = _vial_at("Vial_Right_2", 0.18, -0.18)
 
     # ── 中央試管架（兩臂共用，4 槽）──
     # 架子原點在角落、body 中心在本地 (0.06, 0.06)；放原點 (0.16, -0.06) 讓 body 中心

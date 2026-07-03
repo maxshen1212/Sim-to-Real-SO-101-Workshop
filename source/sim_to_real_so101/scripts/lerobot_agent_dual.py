@@ -133,58 +133,60 @@ def main():
             env.close()
             simulation_app.close()
 
-    while simulation_app.is_running():
-        with torch.inference_mode():
-            # 讀兩支 leader：real_* = 原始正規化讀值(給 dataset action)，mapped_* = sim 弧度(給 env.step)
-            real_left, mapped_left = iface_left.real_to_sim_obs_processor(
-                iface_left.robot.get_action()
-            )
-            real_right, mapped_right = iface_right.real_to_sim_obs_processor(
-                iface_right.robot.get_action()
-            )
-            actions[..., 0:6] = mapped_left
-            actions[..., 6:12] = mapped_right
+    try:
+        while simulation_app.is_running():
+            with torch.inference_mode():
+                # 讀兩支 leader：real_* = 原始正規化讀值(給 dataset action)，mapped_* = sim 弧度(給 env.step)
+                real_left, mapped_left = iface_left.real_to_sim_obs_processor(
+                    iface_left.robot.get_action()
+                )
+                real_right, mapped_right = iface_right.real_to_sim_obs_processor(
+                    iface_right.robot.get_action()
+                )
+                actions[..., 0:6] = mapped_left
+                actions[..., 6:12] = mapped_right
 
-            obs, _, _, _, _ = env.step(actions)
+                obs, _, _, _, _ = env.step(actions)
 
-            if keyboard_control.reset_world:
-                keyboard_control.reset_world = False
-                env.reset()
-                continue
-
-            if recording_mode and keyboard_control.recording:
-                visual_obs = obs.get("visual", None)
-                if visual_obs is None:
-                    print("[WARNING]: no 'visual' obs group — recording needs cameras")
-                    keyboard_control.recording = False
+                if keyboard_control.reset_world:
+                    keyboard_control.reset_world = False
+                    env.reset()
                     continue
 
-                # 12 維 state：兩臂 sim 關節弧度 → 正規化
-                jl = obs["policy"]["joint_pos_left"][0]
-                jr = obs["policy"]["joint_pos_right"][0]
-                real_obs = torch.cat([
-                    iface_left.get_raw_actions_from_radians(jl),
-                    iface_right.get_raw_actions_from_radians(jr),
-                ])
-                # 12 維 action：兩支 leader 原始讀值
-                action_rec = torch.cat([real_left, real_right])
+                if recording_mode and keyboard_control.recording:
+                    visual_obs = obs.get("visual", None)
+                    if visual_obs is None:
+                        print("[WARNING]: no 'visual' obs group — recording needs cameras")
+                        keyboard_control.recording = False
+                        continue
 
-                # 三相機 rgb（recorder 的相機 key = 去掉 camera_ 前綴；obs key = rgb_<key>）
-                rgb_buffers = {c: visual_obs[f"rgb_{c}"][0] for c in cameras}
-                depth_buffers = {}
-                if args_cli.depth:
-                    depth_buffers = {c: visual_obs[f"depth_{c}"][0] for c in cameras}
+                    # 12 維 state：兩臂 sim 關節弧度 → 正規化
+                    jl = obs["policy"]["joint_pos_left"][0]
+                    jr = obs["policy"]["joint_pos_right"][0]
+                    real_obs = torch.cat([
+                        iface_left.get_raw_actions_from_radians(jl),
+                        iface_right.get_raw_actions_from_radians(jr),
+                    ])
+                    # 12 維 action：兩支 leader 原始讀值
+                    action_rec = torch.cat([real_left, real_right])
 
-                recorder.push_frame_to_buffer(
-                    action_rec, real_obs, rgb_buffers, depth_buffers, {}
-                )
+                    # 三相機 rgb（recorder 的相機 key = 去掉 camera_ 前綴；obs key = rgb_<key>）
+                    rgb_buffers = {c: visual_obs[f"rgb_{c}"][0] for c in cameras}
+                    depth_buffers = {}
+                    if args_cli.depth:
+                        depth_buffers = {c: visual_obs[f"depth_{c}"][0] for c in cameras}
 
-    # Flush any queued/encoding episodes before tearing down the sim, otherwise
-    # the last episode's parquet/mp4 can be truncated and corrupt the dataset.
-    if recording_mode:
-        recorder.close()
-
-    env.close()
+                    recorder.push_frame_to_buffer(
+                        action_rec, real_obs, rgb_buffers, depth_buffers, {}
+                    )
+    except KeyboardInterrupt:
+        print("[INFO]: Ctrl+C received - finishing pending episode saves before exit...")
+    finally:
+        # Flush any queued/encoding episodes before tearing down the sim, otherwise
+        # the last episode's parquet/mp4 can be truncated and corrupt the dataset.
+        if recording_mode:
+            recorder.close()
+        env.close()
 
 
 if __name__ == "__main__":

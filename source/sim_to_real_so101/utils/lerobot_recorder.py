@@ -330,12 +330,18 @@ class LeRobotRecorder:
         while not self.episode_processor_stop_event.is_set():
             try:
                 episode = self.episode_queue.get(timeout=1)
+            except queue.Empty:
+                continue
+
+            # A task was retrieved: task_done() must always be called (even on
+            # error) so that episode_queue.join() in close() cannot deadlock.
+            try:
                 print(f"[INFO]: [ASYNC] received episode from queue...")
 
                 action_buffers = episode["action_buffers"]
                 observation_buffer_tensor = episode["observation_buffer_tensor"]
                 rgb_buffer_tensors = episode["rgb_buffer_tensors"]
-                
+
                 total_frames = episode["total_frames"]
 
                 for frame_index in tqdm(range(total_frames), desc="Processing frames", unit="frame"):
@@ -370,7 +376,6 @@ class LeRobotRecorder:
                 self.dataset.save_episode()
                 self.dataset.finalize()
                 self._init_existing_dataset()
-                self.episode_queue.task_done()
 
                 self.num_recorded_episodes += 1
                 print(f"[INFO]: Episode {self.num_recorded_episodes} saved.")
@@ -380,11 +385,10 @@ class LeRobotRecorder:
                 else:
                     print(f"[INFO]: Additional {self.episode_queue.qsize()} episodes in queue.")
 
-            except queue.Empty:
-                continue
             except Exception as e:
                 print(f"Error in async processing: {e}")
-                continue
+            finally:
+                self.episode_queue.task_done()
 
     def _save_video(self, frames_rgb, camera_name, data_type, episode_index):
         """
@@ -479,9 +483,31 @@ class LeRobotRecorder:
         frames_rgb = frames.astype(np.uint8) if frames.dtype != np.uint8 else frames
         self._save_video(frames_rgb, camera_name, "instance_id_segmentation", episode_index)
 
-    def _del__(self):
-        # stop the episode processor thread
+    def close(self):
+        """Drain any pending episodes, then stop the processor thread.
+
+        Call this before tearing down the simulator so that episodes still
+        queued/encoding are flushed to disk. Skipping it can truncate the
+        parquet/mp4 of the last episode and corrupt the dataset.
+        """
+        if getattr(self, "episode_processor_thread", None) is None:
+            return
+
+        pending = self.episode_queue.qsize()
+        if pending:
+            print(f"[INFO]: Waiting for {pending} pending episode(s) to finish saving...")
+        # Block until every queued episode has been processed (task_done()).
+        self.episode_queue.join()
+
+        # Stop the processor thread and wait for it to actually exit.
         self.episode_processor_stop_event.set()
-        self.episode_processor_thread.join(timeout=0.1)
+        self.episode_processor_thread.join(timeout=10)
         self.episode_processor_thread = None
-        print("processor thread joined")
+        print("[INFO]: Recorder closed. All episodes saved.")
+
+    def __del__(self):
+        # Best-effort safety net if close() was not called explicitly.
+        try:
+            self.close()
+        except Exception:
+            pass

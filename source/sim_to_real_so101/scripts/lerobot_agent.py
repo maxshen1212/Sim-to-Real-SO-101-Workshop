@@ -171,52 +171,58 @@ def main():
             env.close()
             simulation_app.close()
 
-    while simulation_app.is_running():
-        # run everything in inference mode
-        with torch.inference_mode():
-            real_action = robot_iface.robot.get_action()
-            real_action, mapped_action = robot_iface.real_to_sim_obs_processor(
-                real_action
-            )
-            actions[:] = mapped_action
+    try:
+        while simulation_app.is_running():
+            # run everything in inference mode
+            with torch.inference_mode():
+                real_action = robot_iface.robot.get_action()
+                real_action, mapped_action = robot_iface.real_to_sim_obs_processor(
+                    real_action
+                )
+                actions[:] = mapped_action
 
-            obs, _, _, _, _ = env.step(actions)
+                obs, _, _, _, _ = env.step(actions)
 
-            if keyboard_control.reset_world:
-                keyboard_control.reset_world = False
-                env.reset()
-                continue
-
-            if recording_mode and keyboard_control.recording:
-                visual_obs = obs.get("visual", None)
-                if visual_obs is None:
-                    print(
-                        "[WARNING]: No 'visual' observation group - recording requires a task with cameras"
-                    )
-                    keyboard_control.recording = False
+                if keyboard_control.reset_world:
+                    keyboard_control.reset_world = False
+                    env.reset()
                     continue
-                # Extract joint positions from policy observation dict
-                joint_pos_obs = obs["policy"]["joint_pos_obs"][0]
-                visual_obs = obs["visual"]
-                real_obs, visual_buffers, depth_buffers, instance_id_seg_buffers = (
-                    robot_iface.sim_to_real_dataset_processor(joint_pos_obs, visual_obs)
-                )
-                recorder.push_frame_to_buffer(
-                    real_action,
-                    real_obs,
-                    visual_buffers,
-                    depth_buffers,
-                    instance_id_seg_buffers,
-                )
 
-    env.close()
+                if recording_mode and keyboard_control.recording:
+                    visual_obs = obs.get("visual", None)
+                    if visual_obs is None:
+                        print(
+                            "[WARNING]: No 'visual' observation group - recording requires a task with cameras"
+                        )
+                        keyboard_control.recording = False
+                        continue
+                    # Extract joint positions from policy observation dict
+                    joint_pos_obs = obs["policy"]["joint_pos_obs"][0]
+                    visual_obs = obs["visual"]
+                    real_obs, visual_buffers, depth_buffers, instance_id_seg_buffers = (
+                        robot_iface.sim_to_real_dataset_processor(joint_pos_obs, visual_obs)
+                    )
+                    recorder.push_frame_to_buffer(
+                        real_action,
+                        real_obs,
+                        visual_buffers,
+                        depth_buffers,
+                        instance_id_seg_buffers,
+                    )
+    except KeyboardInterrupt:
+        print("[INFO]: Ctrl+C received - finishing pending episode saves before exit...")
+    finally:
+        # Flush any queued/encoding episodes before tearing down the sim, otherwise
+        # the last episode's parquet/mp4 can be truncated and corrupt the dataset.
+        if recording_mode:
+            recorder.close()
+        env.close()
 
 
 if __name__ == "__main__":
 
     main()
 
-    while True:
-        simulation_app.update()
-
+    # Close the simulator and exit. (The previous `while True: update()` loop here
+    # never terminated, so closing Isaac Sim hung the process and forced a Ctrl+C.)
     simulation_app.close()

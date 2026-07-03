@@ -179,11 +179,15 @@ def main():
                     action_rec, real_obs, rgb_buffers, depth_buffers, {}
                 )
 
+    # Flush any queued/encoding episodes before tearing down the sim, otherwise
+    # the last episode's parquet/mp4 can be truncated and corrupt the dataset.
+    if recording_mode:
+        recorder.close()
+
     env.close()
 
 
 if __name__ == "__main__":
     main()
-    while True:
-        simulation_app.update()
+    
     simulation_app.close()

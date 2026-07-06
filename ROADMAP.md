@@ -3,7 +3,7 @@
 **目標**:把單臂模擬環境改成雙臂,換上自製支架 + RealSense D435i,用 3 相機收 RGB+depth,
 雙臂遙操作收資料 → 訓練 GR00T → Domain Randomization + 真實資料 co-training → sim-to-real。
 
-最後更新:2026-07-01
+最後更新:2026-07-06
 
 ---
 
@@ -96,12 +96,12 @@ Phase 8  Co-training + 部署
 - ✅ `lerobot_recorder.py` 參數化 `joint_names`(單臂預設 6;雙臂傳 12 個 `left_*/right_*`)
 - ✅ 驅動路徑已驗:兩臂各自抓取、`[RACK] ... placed` 正確獨立觸發
 
-**協作式任務改造(把「左右分邊」改成「任一臂拿任一支」)** — 待做:
+**協作式任務改造(把「左右分邊」改成「任一臂拿任一支」)** — ✅ 完成(2026-07-06,待 sim 目視驗證):
 > 註:下面 1、2 只影響**除錯/成功訊號**,**不影響錄下的 dataset**(subtask obs 不寫入 dataset);
 > 3 影響實際擺放,對「人看到什麼、去夾什麼」才重要。
-- [ ] **接觸感測器 filter** → `contact_grasp_left` 與 `_right` **各自 filter 全部 4 支**(現在只 filter 自己半邊)
-- [ ] **subtask 觀測** → `vial_grasped_left/right`、`vial_placed_left/right` 的 `vials` 改成**全部 4 支**
-- [ ] **reset 隨機化** → 試管**散佈整個墊子**(基準位置打散 + 加大 pose_range),不再固定左 y>0 / 右 y<0
+- [x] **接觸感測器 filter** → `contact_grasp_left` 與 `_right` **各自 filter 全部 4 支**(共用 `VIAL_PRIMS_ALL`)
+- [x] **subtask 觀測** → `vial_grasped_left/right`、`vial_placed_left/right` 的 `vials` 改成**全部 4 支**(`VIALS_ALL`,順序對齊 filter)
+- [x] **reset 隨機化** → 試管**散佈整個墊子近側**(基準位置打散 + y jitter ±0.01→±0.03),不再固定左 y>0 / 右 y<0;中間兩支放低 x 避開架子 footprint
 
 **收資料驗證** — 待做:
 - [ ] 重裝註冊 console script:`uv pip install -e source/sim_to_real_so101/`
@@ -204,3 +204,7 @@ Phase 8  Co-training + 部署
   試管初始位置往近側調(x 0.23→0.18)
 - 2026-07-01 — 調整並目視確認 ego 中央相機:world (-0.23,0.03,0.53)、高 ~0.53m、俯視墊子中心、HFOV≈69°(D435);
   `camera_center` 畫面置中正確,參數記入上表
+- 2026-07-06 — 完成 P4A 協作式任務改造(so101_dual_vials_env_cfg.py):兩 contact sensor + 四個 subtask obs 都改吃全部 4 支
+  (`VIAL_PRIMS_ALL`/`VIALS_ALL`,順序對齊避免抓取判定張冠李戴);試管基準位置打散、y jitter 加大到 ±0.03,
+  中間兩支放低 x=0.12 避開架子 footprint(world x[0.16,0.28] y[-0.06,0.06]);yaw 保持 0(避免立起的試管被大 yaw delta 弄倒)。
+  待 sim 目視驗證:reset 後 4 支散落不壓架子、任一臂抓任一支能觸發正確 subtask 訊號

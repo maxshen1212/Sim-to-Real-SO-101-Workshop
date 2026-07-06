@@ -44,7 +44,7 @@ Phase 2  雙臂 Isaac Lab 環境                         ✅ 完成
 Phase 3  三相機 + RGB/Depth                          ✅ 完成
 Phase 4A 雙臂遙操作 + 收資料(固定 4 支,選項 1)     ← 現在(錄製程式已建好,待實跑驗證)
 Phase 4B 數量隨機(選項 2,1~4 支)                   ← 之後補,增加數量魯棒性
-Phase 5  Domain Randomization
+Phase 5  Domain Randomization                        🔶 大致完成(紋理待補),待 sim 驗證
 Phase 6  GR00T 訓練(純 sim)+ dual-safe 成功判定
 Phase 7  真機對齊 + 收真實資料
 Phase 8  Co-training + 部署
@@ -137,15 +137,22 @@ Phase 8  Co-training + 部署
 
 ## Phase 5 — Domain Randomization
 
-複用單臂 `vials_to_rack_env_cfg.py` 的 DR event。
+複用單臂 `vials_to_rack_env_cfg.py` 的 DR event。實作於 `so101_dual_vials_env_cfg.py`
+的 `SO101DualVialsDRSceneCfg` / `SO101DualVialsEventDRCfg` / `SO101DualVialsDREnvCfg`。
+(2026-07-06 大致完成,待 sim 目視驗證)
 
-- [ ] 光照(`randomize_light_exposure` / `randomize_sky_light`,多張 HDRI)
-- [ ] 機器人顏色(左右臂都要;現有 `randomize_robot_color` 寫死 "robot",要擴成左右兩臂)
-- [ ] 三相機 pose + focal length 抖動
-- [ ] 桌面紋理 + 旋轉
-- [ ] 註冊 `Lerobot-So101-Dual-Vials-To-Rack-DR`
+- [x] 光照:燈箱曝光(base 層 `reset_lightbox_light_exposure` 已含)+ DR 加 `randomize_sky_light`(換 HDRI + 曝光 + 色溫,25 張 .exr)
+- [x] 機器人顏色(左右臂都要):`randomize_robot_color` 已擴成多機器人,DR 傳 `("robot_left","robot_right")` 各自獨立隨機
+- [~] 三相機 pose + focal length 抖動:**兩腕相機抖焦距** + **中央 ego 相機抖位姿**。
+      刻意沿用單臂分工:中央 ego「不」抖焦距(FOV≈69° 已量測對齊真機,抖焦距會破壞 sim-real 對齊);
+      腕相機「不」抖位姿(mount xform 是否支援待 Isaac 內確認)。→ 若確認 mount 可動再補腕位姿。
+- [~] 桌面紋理 + **旋轉**:旋轉已加大(base ±0.1 → DR ±0.3);**紋理未做**(目前無 mat 紋理隨機器,
+      單臂也只旋轉;要補需另建 texture-swap 函式 + 多紋理 mat 資產,外觀多樣性暫由 HDRI 天空光補)
+- [x] 註冊 `Lerobot-So101-Dual-Vials-To-Rack-DR`
 
 ✅ **完成標準**:每次 reset 外觀明顯不同,但任務幾何不變。
+⚠️ **驗證重點**:DR reset 後左右臂顏色會變、天空光/HDRI 會換、腕相機 FOV 微變、中央相機小幅位移;
+   但中央相機 FOV 與所有試管/架子幾何維持不變。
 
 ---
 
@@ -208,3 +215,7 @@ Phase 8  Co-training + 部署
   (`VIAL_PRIMS_ALL`/`VIALS_ALL`,順序對齊避免抓取判定張冠李戴);試管基準位置打散、y jitter 加大到 ±0.03,
   中間兩支放低 x=0.12 避開架子 footprint(world x[0.16,0.28] y[-0.06,0.06]);yaw 保持 0(避免立起的試管被大 yaw delta 弄倒)。
   待 sim 目視驗證:reset 後 4 支散落不壓架子、任一臂抓任一支能觸發正確 subtask 訊號
+- 2026-07-06 — P5 DR 大致完成:`randomize_robot_color` 擴成多機器人(左右臂各自隨機);新增 DR 場景(sky_light DomeLight)+
+  DR 事件(機器人顏色、天空光 HDRI/曝光/色溫、墊子旋轉加大到 ±0.3、兩腕相機焦距抖動、中央 ego 相機位姿抖動);
+  註冊 `Lerobot-So101-Dual-Vials-To-Rack-DR`。中央相機刻意不抖焦距(保 HFOV≈69° 對齊)、腕相機不抖位姿(mount 待確認);
+  桌面「紋理」隨機化未做(無此函式,暫靠 HDRI 補外觀多樣)。待 sim 目視驗證外觀變、幾何不變

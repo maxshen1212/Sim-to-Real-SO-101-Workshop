@@ -42,7 +42,7 @@ from isaaclab.managers import SceneEntityCfg
 from isaaclab.managers import ObservationGroupCfg as ObsGroup
 from isaaclab.managers import ObservationTermCfg as ObsTerm
 from isaaclab.utils import configclass
-from isaaclab.assets import RigidObjectCfg, ArticulationCfg
+from isaaclab.assets import RigidObjectCfg, ArticulationCfg, AssetBaseCfg
 from isaaclab.sensors import ContactSensorCfg
 from isaacsim.core.utils.rotations import euler_angles_to_quat
 
@@ -55,6 +55,12 @@ from sim_to_real_so101.mdp import (
     reset_vials_rack,
     any_vial_grasped,
     vial_placed_on_rack,
+    ROBOT_COLORS,
+    randomize_robot_color,
+    randomize_sky_light,
+    randomize_mat_rotation,
+    randomize_camera_focal_length,
+    randomize_camera_pose,
 )
 
 from .so101_dual_task_env_cfg import (
@@ -277,3 +283,121 @@ class SO101DualVialsEnvCfg(SO101DualTaskEnvCfg):
     scene: SO101DualVialsSceneCfg = SO101DualVialsSceneCfg()
     events: SO101DualVialsEventCfg = SO101DualVialsEventCfg()
     observations: SO101DualVialsObservationsCfg = SO101DualVialsObservationsCfg()
+
+
+# ============================================================
+# DR 版場景（Phase 5）── 加入可隨機化的天空光（HDRI DomeLight）
+# ============================================================
+@configclass
+class SO101DualVialsDRSceneCfg(SO101DualVialsSceneCfg):
+
+    # 天空光掛在 /World（全域，不在 ENV_REGEX_NS 內）；reset 時換 HDRI + 調曝光/色溫。
+    sky_light = AssetBaseCfg(
+        prim_path="/World/sky_light",
+        spawn=sim_utils.DomeLightCfg(
+            intensity=1000.0,
+            texture_file=f"{assets_path}/hdri/moon_lab_1k.exr",  # 預設，reset 會被換掉
+            visible_in_primary_ray=False,   # 不讓天空光本身出現在相機畫面
+            enable_color_temperature=True,
+            color_temperature=6500.0,
+        ),
+    )
+
+
+# ============================================================
+# DR 版事件（Phase 5）── 在 base reset 之上加外觀隨機化
+#
+# 沿用單臂驗證過的做法（vials_to_rack_env_cfg.py）：
+#   - 機器人顏色：左右兩臂各自獨立隨機（randomize_robot_color robot_names）
+#   - 天空光：換 HDRI + 曝光 + 色溫
+#   - 墊子旋轉：覆寫 base 的 ±0.1 → 加大到 ±0.3
+#   - 相機：兩腕相機焦距抖動 + 中央 ego 相機位姿抖動
+#
+# 相機刻意沿用單臂的分工（焦距抖腕、位姿抖中央）：
+#   - 中央 ego 相機「不」抖焦距 —— 它的 FOV(HFOV≈69°=D435)已量測對齊真機，
+#     抖焦距會把 FOV 推離真值、破壞 sim-real 對齊，只小幅抖位姿模擬安裝誤差。
+#   - 腕相機只抖焦距、不抖位姿 —— 沿用單臂;腕部 mount xform 是否支援位姿抖動待
+#     Isaac 內確認後再加。
+# ============================================================
+@configclass
+class SO101DualVialsEventDRCfg(SO101DualVialsEventCfg):
+
+    # ── 機器人顏色（左右兩臂）──
+    reset_set_robot_visual_material = EventTerm(
+        func=randomize_robot_color,
+        mode="reset",
+        params={
+            "color_names": list(ROBOT_COLORS.keys()),
+            "robot_names": ("robot_left", "robot_right"),
+        },
+    )
+
+    # ── 天空光 HDRI + 曝光 + 色溫 ──
+    reset_sky_light = EventTerm(
+        func=randomize_sky_light,
+        mode="reset",
+        params={
+            "exposure_range": (-4.0, 3.0),        # 室內到室外
+            "temperature_range": (2500.0, 9500.0),  # 暖黃到冷藍
+            "textures_root": f"{assets_path}/hdri",
+            "asset_cfg": SceneEntityCfg("sky_light"),
+        },
+    )
+
+    # ── 墊子旋轉（覆寫 base 的 ±0.1 → ±0.3 ≈ ±17°）──
+    reset_mat_rotation = EventTerm(
+        func=randomize_mat_rotation,
+        mode="reset",
+        params={
+            "yaw_range": (-0.3, 0.3),
+            "asset_cfg": SceneEntityCfg("mat"),
+        },
+    )
+
+    # ── 左腕相機焦距抖動（基準 13.5mm）──
+    reset_camera_wrist_left_fov = EventTerm(
+        func=randomize_camera_focal_length,
+        mode="reset",
+        params={
+            "focal_length_range": (12.0, 15.0),
+            "asset_cfg": SceneEntityCfg("camera_wrist_left"),
+        },
+    )
+
+    # ── 右腕相機焦距抖動 ──
+    reset_camera_wrist_right_fov = EventTerm(
+        func=randomize_camera_focal_length,
+        mode="reset",
+        params={
+            "focal_length_range": (12.0, 15.0),
+            "asset_cfg": SceneEntityCfg("camera_wrist_right"),
+        },
+    )
+
+    # ── 中央 ego 相機位姿抖動（模擬安裝不精確；不抖焦距以保 FOV 對齊）──
+    reset_camera_center_pose = EventTerm(
+        func=randomize_camera_pose,
+        mode="reset",
+        params={
+            "prim_path_pattern": "{ENV_REGEX_NS}/LightStudio/LightBox/ego_cam",
+            "pos_range": {
+                "x": (-0.02, 0.02),  # ±2 cm
+                "y": (-0.02, 0.02),
+                "z": (-0.01, 0.01),
+            },
+            "rot_range": {
+                "roll": (-0.05, 0.05),  # ±約 3°
+                "pitch": (-0.05, 0.05),
+                "yaw": (-0.05, 0.05),
+            },
+        },
+    )
+
+
+# ============================================================
+# DR 版完整環境（訓練用；仍無 terminations，錄製/rollout 皆可）
+# ============================================================
+@configclass
+class SO101DualVialsDREnvCfg(SO101DualVialsEnvCfg):
+    scene: SO101DualVialsDRSceneCfg = SO101DualVialsDRSceneCfg()
+    events: SO101DualVialsEventDRCfg = SO101DualVialsEventDRCfg()

@@ -171,3 +171,31 @@ PY
 - `observation.state` 與 `action` 形狀 **(12,)**、`names` 為 6 個 `left_*` + 6 個 `right_*`。
 - 有 **3 個** `observation.images.*`(`wrist_left` / `wrist_right` / `center`),480×640。
 - `fps=30`、`episodes` = 你錄的集數。
+
+## 7. 刪除品質不好的 episode(用「檔號 file-XXX」刪)
+
+**先列出目前每一集**(檔號、長度、可開來看的影片路徑):
+
+```bash
+python tools/list_episodes.py
+```
+
+**開影片確認哪幾集不好,記下它的檔號,再用檔號刪**(可多個):
+
+```bash
+python tools/delete_episodes.py 47 30      # 刪掉 file-047、file-030 那兩集
+```
+
+- **用「檔號」刪,不是 episode_index。** 檔號穩定(刪掉後永遠空著、不會被重用);
+  episode_index 每次刪都會重排,容易搞錯。工具會在刪之前印出「檔號 → episode_index」對照讓你確認。
+- 檔號打錯或已刪 → 直接報錯、不動資料。
+- 純刪除,不會自動上傳;要更新 Hub 就刪完再跑第 5 步的 `lerobot_push_dataset`。
+- 內建安全網:先寫到暫存目錄並驗證能載入,才替換正式資料;失敗時原始資料留在 `..._bak`。
+
+> ⚠️ **不要直接用官方 CLI `lerobot-edit-dataset`。** 它假設資料集在 `<root>/<repo_id>`
+> (org/名稱 巢狀結構),但本專案是扁平的 `datasets/bimanual-so101-pickvials`,
+> CLI 會把結果寫進 `datasets/bimanual-so101-pickvials/ChihHanShen/...` 這種巢狀錯位置、
+> 不會替換到你的資料集。wrapper 用明確輸出路徑繞過這個問題。
+
+> 檔名本來就會有空號(刪過的檔號空著、不連續),屬正常、不影響訓練/上傳。
+> 最後全部收集完、要整理成漂亮的連續編號時,再跟我說跑一次「重新切分」即可。

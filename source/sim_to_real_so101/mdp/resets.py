@@ -39,20 +39,26 @@ ROBOT_COLORS = {
 }
 
 
-def randomize_robot_color(env, 
+def randomize_robot_color(env,
     env_ids: torch.Tensor | None,
     color_names: list[str] = list(ROBOT_COLORS.keys()),
+    robot_names: tuple[str, ...] = ("robot",),
 ):
-    """Randomly set robot color from predefined palette on each reset."""
-    # color_names = list(ROBOT_COLORS.keys())
-    idx = torch.randint(0, len(color_names), (1,), device="cpu").item()
-    selected_color = ROBOT_COLORS[color_names[idx]]
-    
+    """Randomly set robot color from predefined palette on each reset.
+
+    Each robot in ``robot_names`` is drawn an independent color, so the same
+    term serves single-arm (default ``("robot",)``) and dual-arm
+    (``("robot_left", "robot_right")``) scenes. Colour is appearance-only DR,
+    so the two arms deliberately need not match.
+    """
     with Sdf.ChangeBlock():
-        robot = env.scene["robot"]
-        material_prim_path = robot.cfg.prim_path + "/Looks/material_a_3d_printed/Shader"
-        material_prim = sim_utils.find_matching_prims(material_prim_path)[0]
-        material_prim.GetAttribute("inputs:diffuse_color_constant").Set(selected_color)
+        for robot_name in robot_names:
+            idx = torch.randint(0, len(color_names), (1,), device="cpu").item()
+            selected_color = ROBOT_COLORS[color_names[idx]]
+            robot = env.scene[robot_name]
+            material_prim_path = robot.cfg.prim_path + "/Looks/material_a_3d_printed/Shader"
+            material_prim = sim_utils.find_matching_prims(material_prim_path)[0]
+            material_prim.GetAttribute("inputs:diffuse_color_constant").Set(selected_color)
 
 def randomize_mat_rotation(
     env,

@@ -135,6 +135,19 @@ lerobot_agent_dual \
 - 丟掉壞的 + 換佈局 → 先 **C** 再 **R**(直接按 R 會把壞的存進去)。
 - 先錄 3~5 集 → 跳到第 6 步檢查 schema 正確,再放大到 50~100 集。
 
+## 4b. DR 錄製(全套 domain randomization)
+
+跟第 4 步一樣,只是 task 換成 `-DR`,每集會隨機化 架子顏色/機器人顏色/光/天空/墊子/**相機 pose+焦距**/試管透明/試管數(1~4)。**注意相機也會抖 → 每集視角不同。**寫到另一個資料集,避免混進乾淨的 74 集:
+
+```bash
+lerobot_agent_dual --task Lerobot-So101-Dual-Vials-To-Rack-DR \
+  --repo_id ChihHanShen/bimanual-so101-pickvials \
+  --repo_root $(pwd)/datasets/bimanual-so101-pickvials \
+  --task_name "Pick up the vials and place them into the rack"
+```
+
+鍵盤操作、schema 檢查、上傳都跟第 4~6 步相同。
+
 ## 5. 上傳到 HuggingFace(手動、獨立步驟)
 
 ```bash

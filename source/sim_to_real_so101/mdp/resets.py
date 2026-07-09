@@ -60,6 +60,67 @@ def randomize_robot_color(env,
             material_prim = sim_utils.find_matching_prims(material_prim_path)[0]
             material_prim.GetAttribute("inputs:diffuse_color_constant").Set(selected_color)
 
+
+# Vial-rack color palette for appearance DR. Includes the asset's original
+# yellow plus saturated primaries and neutral/dark tones (incl. black) so the
+# policy sees the rack in many colors.
+RACK_COLORS = {
+    "yellow": (0.93822396, 0.58649296, 0.04346985),  # original Vial_rack_simple.usda color
+    "red": (0.8, 0.12, 0.1),
+    "blue": (0.1, 0.22, 0.8),
+    "green": (0.12, 0.6, 0.2),
+    "orange": (0.876, 0.317, 0.132),
+    "black": (0.02, 0.02, 0.02),
+    "gray": (0.45, 0.45, 0.45),
+    "white": (0.9, 0.9, 0.9),
+}
+
+
+def randomize_rack_color(env,
+    env_ids: torch.Tensor | None,
+    color_names: list[str] = list(RACK_COLORS.keys()),
+    rack_names: tuple[str, ...] = ("rack_left",),
+):
+    """Randomly set the vial-rack color from a predefined palette on each reset.
+
+    Mirrors :func:`randomize_robot_color`: appearance-only DR that edits the
+    rack's OmniPBR shader ``diffuse_color_constant`` via ``Sdf.ChangeBlock``.
+    Each rack in ``rack_names`` is drawn an independent color.
+    """
+    with Sdf.ChangeBlock():
+        for rack_name in rack_names:
+            idx = torch.randint(0, len(color_names), (1,), device="cpu").item()
+            selected_color = RACK_COLORS[color_names[idx]]
+            rack = env.scene[rack_name]
+            shader_prim_path = rack.cfg.prim_path + "/Looks/OmniPBR/Shader"
+            shader_prim = sim_utils.find_matching_prims(shader_prim_path)[0]
+            shader_prim.GetAttribute("inputs:diffuse_color_constant").Set(selected_color)
+
+
+def randomize_vial_transparency(env,
+    env_ids: torch.Tensor | None,
+    opacity_range: tuple[float, float] = (0.08, 0.5),
+    vials: tuple[str, ...] = ("vial_1", "vial_2", "vial_3"),
+):
+    """Randomize per-vial body opacity on each reset (see-through glass DR).
+
+    The vial body material is an OmniPBR shader with ``enable_opacity`` on (see
+    ``Vial_opaque.usda``); this term samples a fresh ``opacity_constant`` in
+    ``opacity_range`` (0 = fully transparent, 1 = opaque) so the policy sees
+    vials ranging from nearly clear glass to translucent. Each vial is drawn an
+    independent opacity.
+    """
+    with Sdf.ChangeBlock():
+        for vial_name in vials:
+            opacity = math_utils.sample_uniform(
+                opacity_range[0], opacity_range[1], (1,), device="cpu"
+            ).item()
+            vial = env.scene[vial_name]
+            shader_prim_path = vial.cfg.prim_path + "/Looks/Vial_plastic/Shader"
+            shader_prim = sim_utils.find_matching_prims(shader_prim_path)[0]
+            shader_prim.GetAttribute("inputs:opacity_constant").Set(opacity)
+
+
 def randomize_mat_rotation(
     env,
     env_ids: torch.Tensor | None,
@@ -387,3 +448,50 @@ def reset_vials_rack(
             _, _ = random_asset_pose(env, env_ids, v, pose_range_z_fixed, pos_offset)
             zero_velocity = torch.zeros((len(env_ids), 6), device=v.device)
             v.write_root_velocity_to_sim(zero_velocity, env_ids=env_ids)
+
+
+def hide_random_vials(
+        env,
+        env_ids: torch.Tensor,
+        vials: list[str],
+        min_count: int = 1,
+        max_count: int = 4,
+        hide_xy: tuple[float, float] = (2.0, 2.0),
+        hide_z: float = 0.05,
+):
+    """Keep a random number of vials on the mat, park the rest off-scene.
+
+    Meant to run *after* the normal placement (:func:`reset_vials_rack`): the
+    placement leaves all vials on the mat, then this term picks a per-env random
+    count in ``[min_count, max_count]`` to keep and teleports the remaining vials
+    far away (``hide_xy``, ~2 m out) so they are out of every camera's view and
+    unreachable. Each hidden vial gets a distinct spot and zeroed velocity.
+
+    The grasp/placement observations consider all vials, but a parked vial is
+    never contacted or placed, so effectively only the on-mat vials count.
+    """
+    vial_objects: list[RigidObject | Articulation] = [env.scene[name] for name in vials]
+    n_vials = len(vial_objects)
+    E = len(env_ids)
+    device = env.unwrapped.device
+
+    # per-env: mark which vials are hidden this reset (mask on env_ids' device
+    # so the boolean indexing below is valid)
+    hidden_mask = torch.zeros((n_vials, E), dtype=torch.bool, device=env_ids.device)
+    for e in range(E):
+        n_keep = torch.randint(min_count, max_count + 1, (1,)).item()
+        for vi in torch.randperm(n_vials).tolist()[n_keep:]:
+            hidden_mask[vi, e] = True
+
+    for vi, v in enumerate(vial_objects):
+        env_subset = env_ids[hidden_mask[vi]]
+        if len(env_subset) == 0:
+            continue
+        k = len(env_subset)
+        pos = torch.tensor(
+            [hide_xy[0] + 0.1 * vi, hide_xy[1], hide_z], device=device
+        ).unsqueeze(0).repeat(k, 1) + env.scene.env_origins[env_subset]
+        quat = v.data.default_root_state[env_subset][:, 3:7]
+        pose = torch.cat([pos, quat], dim=-1)
+        v.write_root_pose_to_sim(pose, env_ids=env_subset)
+        v.write_root_velocity_to_sim(torch.zeros((k, 6), device=v.device), env_ids=env_subset)

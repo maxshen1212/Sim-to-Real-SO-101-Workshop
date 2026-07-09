@@ -53,10 +53,14 @@ from sim_to_real_so101.assets.so101 import (
 )
 from sim_to_real_so101.mdp import (
     reset_vials_rack,
+    hide_random_vials,
     any_vial_grasped,
     vial_placed_on_rack,
     ROBOT_COLORS,
+    RACK_COLORS,
     randomize_robot_color,
+    randomize_rack_color,
+    randomize_vial_transparency,
     randomize_sky_light,
     randomize_mat_rotation,
     randomize_camera_focal_length,
@@ -95,7 +99,10 @@ _rack = RigidObjectCfg(
     init_state=RigidObjectCfg.InitialStateCfg(pos=(0.18, 0.0, 0.06)),
 )
 
-# 直立朝向（USD 預設橫躺，繞 Y 轉 90° 站起來）
+# 試管擺放朝向（沿用你錄 74 集的穩定基準）。
+# 註：此 [0,90,0] 其實會把沿 Z 細長的試管「放倒」成沿世界 X（診斷 quat
+# =[0.707,0,0.707,0] 已證實），與變數名/註解宣稱的「直立」相反；若日後要真的
+# 站直，改成 identity (1,0,0,0) 並把 reset 的 roll 抖動調小（避免站著被 roll 弄倒）。
 _UPRIGHT = euler_angles_to_quat(np.array([0, 90, 0]), degrees=True)
 
 
@@ -135,8 +142,8 @@ class SO101DualVialsSceneCfg(SO101DualTaskSceneCfg):
     #   - 外側兩支(|y|≈0.17)可放高 x=0.16，因為 |y| 遠離架子 y 帶。
     # 形成「前面撿散落試管 → 放後面中央架」的動線，避免和架子擠在同一條深度線上。
     vial_left_1 = _vial_at("Vial_Left_1", 0.16, 0.17)
-    vial_left_2 = _vial_at("Vial_Left_2", 0.12, 0.07)
-    vial_right_1 = _vial_at("Vial_Right_1", 0.12, -0.07)
+    vial_left_2 = _vial_at("Vial_Left_2", 0.12, 0.1)
+    vial_right_1 = _vial_at("Vial_Right_1", 0.12, -0.1)
     vial_right_2 = _vial_at("Vial_Right_2", 0.16, -0.17)
 
     # ── 中央試管架（兩臂共用，4 槽）──
@@ -153,18 +160,14 @@ class SO101DualVialsSceneCfg(SO101DualTaskSceneCfg):
         update_period=0.0,
         history_length=1,
         debug_vis=False,
-        filter_prim_paths_expr=[
-            "{ENV_REGEX_NS}/" + p for p in VIAL_PRIMS_ALL
-        ],
+        filter_prim_paths_expr=["{ENV_REGEX_NS}/" + p for p in VIAL_PRIMS_ALL],
     )
     contact_grasp_right = ContactSensorCfg(
         prim_path="{ENV_REGEX_NS}/Robot_Right/jaw",
         update_period=0.0,
         history_length=1,
         debug_vis=False,
-        filter_prim_paths_expr=[
-            "{ENV_REGEX_NS}/" + p for p in VIAL_PRIMS_ALL
-        ],
+        filter_prim_paths_expr=["{ENV_REGEX_NS}/" + p for p in VIAL_PRIMS_ALL],
     )
 
 
@@ -192,11 +195,23 @@ class SO101DualVialsEventCfg(DualTaskEventCfg):
             "pose_range": {
                 "x": (-0.03, 0.03),
                 "y": (-0.03, 0.03),
-                "roll": (-0.3, 0.3),
+                "roll": (0.0, 0.0),
                 "yaw": (0.0, 0.0),
             },
             "fixed_vial_z": VIAL_SPAWN_Z,
             "rack_placement_prob": 0.0,  # 遙操作錄製：先不要預先擺一支在架上
+        },
+    )
+
+    # ── 隨機出現數量：每次 reset 隨機保留 1~4 支，其餘移到場景外（相機看不到、搆不到）──
+    # 排在 reset_vials_setup 之後：先照常 2/2 擺放，再把沒選中的試管停到遠處。
+    reset_hide_vials = EventTerm(
+        func=hide_random_vials,
+        mode="reset",
+        params={
+            "vials": VIALS_ALL,
+            "min_count": 1,
+            "max_count": 4,
         },
     )
 
@@ -282,7 +297,9 @@ class SO101DualVialsObservationsCfg(DualTaskObservationsCfg):
 class SO101DualVialsEnvCfg(SO101DualTaskEnvCfg):
     scene: SO101DualVialsSceneCfg = SO101DualVialsSceneCfg()
     events: SO101DualVialsEventCfg = SO101DualVialsEventCfg()
-    observations: SO101DualVialsObservationsCfg = SO101DualVialsObservationsCfg()
+    observations: SO101DualVialsObservationsCfg = (
+        SO101DualVialsObservationsCfg()
+    )
 
 
 # ============================================================
@@ -297,11 +314,21 @@ class SO101DualVialsDRSceneCfg(SO101DualVialsSceneCfg):
         spawn=sim_utils.DomeLightCfg(
             intensity=1000.0,
             texture_file=f"{assets_path}/hdri/moon_lab_1k.exr",  # 預設，reset 會被換掉
-            visible_in_primary_ray=False,   # 不讓天空光本身出現在相機畫面
+            visible_in_primary_ray=False,  # 不讓天空光本身出現在相機畫面
             enable_color_temperature=True,
             color_temperature=6500.0,
         ),
     )
+
+    # DR 專用：把 4 支試管換成「可控透明度」的 OmniPBR 版（enable_opacity），
+    # 讓 reset 時的 randomize_vial_transparency 能驅動 opacity_constant。
+    # base 錄製場景維持不透明 Vial_opaque.usda，僅 DR 訓練場景改用透明變體。
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        for vial_name in VIALS_ALL:
+            getattr(self, vial_name).spawn.usd_path = (
+                f"{assets_path}/usd/Vial_transparent.usda"
+            )
 
 
 # ============================================================
@@ -337,7 +364,7 @@ class SO101DualVialsEventDRCfg(SO101DualVialsEventCfg):
         func=randomize_sky_light,
         mode="reset",
         params={
-            "exposure_range": (-4.0, 3.0),        # 室內到室外
+            "exposure_range": (-4.0, 3.0),  # 室內到室外
             "temperature_range": (2500.0, 9500.0),  # 暖黃到冷藍
             "textures_root": f"{assets_path}/hdri",
             "asset_cfg": SceneEntityCfg("sky_light"),
@@ -390,6 +417,27 @@ class SO101DualVialsEventDRCfg(SO101DualVialsEventCfg):
                 "pitch": (-0.05, 0.05),
                 "yaw": (-0.05, 0.05),
             },
+        },
+    )
+
+    # ── 中央試管架顏色（從 RACK_COLORS 挑，偏暗含黑色，貼近真實硬體）──
+    reset_rack_color = EventTerm(
+        func=randomize_rack_color,
+        mode="reset",
+        params={
+            "color_names": list(RACK_COLORS.keys()),
+            "rack_names": ("rack_center",),
+        },
+    )
+
+    # ── 試管透明度（see-through 玻璃 DR；每支獨立，opacity 0=全透明、1=不透明）──
+    # 需搭配 DR scene 把試管換成 Vial_transparent.usda（OmniPBR enable_opacity）。
+    reset_vial_transparency = EventTerm(
+        func=randomize_vial_transparency,
+        mode="reset",
+        params={
+            "opacity_range": (0.08, 0.5),
+            "vials": VIALS_ALL,
         },
     )
 

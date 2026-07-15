@@ -96,6 +96,25 @@ gym.register(
     },
 )
 
+# ── Phase 6：雙臂 eval（加終止條件，評估純 sim GR00T policy）──
+gym.register(
+    id="Lerobot-So101-Dual-Vials-To-Rack-Eval",
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.so101_dual_vials_env_cfg:SO101DualVialsEvalEnvCfg",
+    },
+)
+
+gym.register(
+    id="Lerobot-So101-Dual-Vials-To-Rack-DR-Eval",
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.so101_dual_vials_env_cfg:SO101DualVialsEvalDREnvCfg",
+    },
+)
+
 gym.register(
     id="Lerobot-So101-Teleop-Vials-To-Rack",
     entry_point="isaaclab.envs:ManagerBasedRLEnv",

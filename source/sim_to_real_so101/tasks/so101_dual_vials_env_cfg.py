@@ -41,6 +41,7 @@ from isaaclab.managers import EventTermCfg as EventTerm
 from isaaclab.managers import SceneEntityCfg
 from isaaclab.managers import ObservationGroupCfg as ObsGroup
 from isaaclab.managers import ObservationTermCfg as ObsTerm
+from isaaclab.managers import TerminationTermCfg as DoneTerm
 from isaaclab.utils import configclass
 from isaaclab.assets import RigidObjectCfg, ArticulationCfg, AssetBaseCfg
 from isaaclab.sensors import ContactSensorCfg
@@ -56,6 +57,8 @@ from sim_to_real_so101.mdp import (
     hide_random_vials,
     any_vial_grasped,
     vial_placed_on_rack,
+    all_active_vials_placed_termination,
+    time_out,
     ROBOT_COLORS,
     RACK_COLORS,
     randomize_robot_color,
@@ -449,3 +452,78 @@ class SO101DualVialsEventDRCfg(SO101DualVialsEventCfg):
 class SO101DualVialsDREnvCfg(SO101DualVialsEnvCfg):
     scene: SO101DualVialsDRSceneCfg = SO101DualVialsDRSceneCfg()
     events: SO101DualVialsEventDRCfg = SO101DualVialsEventDRCfg()
+
+
+# ============================================================
+# Eval（Phase 6）── 加上終止條件，評估 GR00T policy 用
+#
+# 錄製用 base 沒有 terminations（episode 不會自己結束）。eval 版加：
+#   - time_out：episode 超時強制結束（回下一輪）
+#   - success：dual-safe 成功判定（所有啟用中試管都上架，跨左右夾爪）
+# 幾何/力參數與 SubtaskCfg 的 vial_placed 觀測一致，確保成功標準相同。
+# ============================================================
+@configclass
+class SO101DualVialsTerminationsCfg:
+    """雙臂 vials-to-rack 評估用終止條件。"""
+
+    time_out = DoneTerm(func=time_out, time_out=True)
+
+    success = DoneTerm(
+        func=all_active_vials_placed_termination,
+        time_out=False,
+        params={
+            # 左右兩個夾爪 contact sensor 一起看（協作式：任一臂拿任一支）
+            "contact_sensor_cfgs": (
+                SceneEntityCfg("contact_grasp_left"),
+                SceneEntityCfg("contact_grasp_right"),
+            ),
+            "vials": VIALS_ALL,
+            "rack_name": "rack_center",
+            "force_threshold": 2.0,
+            "rack_local_x_min": 0.0,
+            "rack_local_x_max": 0.12,
+            "rack_local_y_min": 0.0,
+            "rack_local_y_max": 0.12,
+            "rack_local_z_max": 0.1,
+            "vertical_threshold": 0.7,
+            "active_radius": 1.0,
+            "confirm_steps": 25,
+        },
+    )
+
+
+# ── eval env：關掉「隨機藏試管」，固定 4 支全在場 ──
+# 錄製/訓練用 reset_hide_vials 隨機留 1~4 支(數量魯棒性);但 eval 若也隨機藏,
+# 「成功 = 所有 active 試管上架」在只留 1 支的 episode 就會「放 1 支即成功」,
+# 看起來像提早中止、難解讀。eval 固定 4 支 → 成功 = 4 支都放進架子,指標清楚。
+# 用 __post_init__ 把實例上的 event 設 None(Isaac Lab 官方 disable term 做法),
+# 保證生效、不依賴 configclass 對「無標註覆寫成 None」的細節。
+# (要量「數量魯棒性」把下面那行 reset_hide_vials = None 註解掉即可。)
+# episode 超時上限（單位：秒！不是分鐘，也不要除 60）。
+# 錄的示範平均 ~34 秒/集；給 ~5x 餘裕當 timeout（放不完就走 time_out 進下一集）。
+# 想更寬鬆就調大、想 eval 快就調小（失敗的 episode 會一直跑到這個秒數才結束）。
+EVAL_EPISODE_LENGTH_S = 180.0
+
+
+@configclass
+class SO101DualVialsEvalEnvCfg(SO101DualVialsEnvCfg):
+    """乾淨場景 + 終止條件（評估純 sim policy）。固定 4 支、episode 上限 180 秒。"""
+
+    terminations: SO101DualVialsTerminationsCfg = SO101DualVialsTerminationsCfg()
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        self.episode_length_s = EVAL_EPISODE_LENGTH_S  # 秒；success 會提前結束
+        self.events.reset_hide_vials = None  # eval 固定 4 支，不隨機藏
+
+
+@configclass
+class SO101DualVialsEvalDREnvCfg(SO101DualVialsDREnvCfg):
+    """DR 場景 + 終止條件（最嚴格：外觀隨機 + 評估）。固定 4 支、episode 上限 180 秒。"""
+
+    terminations: SO101DualVialsTerminationsCfg = SO101DualVialsTerminationsCfg()
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        self.episode_length_s = EVAL_EPISODE_LENGTH_S  # 秒；success 會提前結束
+        self.events.reset_hide_vials = None  # eval 固定 4 支，不隨機藏

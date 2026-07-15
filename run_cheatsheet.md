@@ -110,7 +110,7 @@ lerobot-calibrate --teleop.type=so101_leader --teleop.port=$TELEOP_PORT_RIGHT --
 zero_agent --task Lerobot-So101-Dual-Vials-To-Rack
 
 # 兩支 leader 驅動 sim、但不錄(確認左右對、抓放偵測正常)
-lerobot_agent_dual --task Lerobot-So101-Dual-Vials-To-Rack
+lerobot_agent_dual --task Lerobot-So101-Dual-Vials-To-Rack-DR
 ```
 
 ## 4. 錄製(三個 repo 參數都給才會啟用錄製;要 depth 加 --depth)
@@ -212,3 +212,73 @@ python tools/delete_episodes.py 47 30      # 刪掉 file-047、file-030 那兩�
 
 > 檔名本來就會有空號(刪過的檔號空著、不連續),屬正常、不影響訓練/上傳。
 > 最後全部收集完、要整理成漂亮的連續編號時,再跟我說跑一次「重新切分」即可。
+
+---
+
+# Eval(Phase 6:純 sim 雙臂 GR00T 在 sim 裡評估)
+
+**全本機、無 Docker**、兩段式、兩個**獨立環境**,透過 ZMQ `localhost:5555` 溝通:
+- **終端機 A**:GR00T server 跑在 `~/Isaac-GR00T` 的 **uv 環境**(`uv run python ...`,首次自動建)。
+- **終端機 B**:`lerobot_eval_dual` 跑在 **`~/env_isaaclab`**,用專案自己的 `gr00t_client` 連 server(跟 GR00T 的 uv 環境無關)。
+
+state/action 依 `examples/SO101_bimanual/modality.json` 分成
+`left_arm`(0:5)/`left_gripper`(5:6)/`right_arm`(6:11)/`right_gripper`(11:12);
+相機 `center`/`wrist_left`/`wrist_right` 已對上,不用 rename。
+
+## A. 起 GR00T server(終端機 A:`~/Isaac-GR00T`,uv 環境)
+
+⚠️ **`--model-path` 要指到 checkpoint 那一層(有 config.json 的目錄),不是 HF repo 根。**
+本專案的 HF repo `ChihHanShen/gr00t-n1.7-so101-bimanual-pickvials` 把 checkpoint **巢狀**放在
+`pickvials-n1p7-run1/checkpoint-XXXXX/` 底下,repo 根**沒有 config.json** → 直接給 repo id 會報
+`Unrecognized model ... should have a model_type key in its config.json`。
+
+先下載選定的 checkpoint(`*` 會遞迴含 experiment_cfg/ 的 stats),再指本機路徑:
+
+```bash
+cd ~/Isaac-GR00T
+
+# 1) 下載 checkpoint-20000(最新;約 6GB。要比較就換成 15000/10000/5000)
+uv run hf download ChihHanShen/gr00t-n1.7-so101-bimanual-pickvials \
+  --include "pickvials-n1p7-run1/checkpoint-20000/*" \
+  --local-dir ~/models/bimanual-pickvials
+
+# 2) 起 server,--model-path 指到那個 checkpoint 目錄
+uv run python gr00t/eval/run_gr00t_server.py \
+    --model-path ~/models/bimanual-pickvials/pickvials-n1p7-run1/checkpoint-20000 \
+    --embodiment-tag new_embodiment \
+    --modality-config-path examples/SO101_bimanual/so101_bimanual_config.py \
+    --device cuda:0
+```
+
+- `--embodiment-tag new_embodiment` = 訓練時用的 tag(checkpoint 的 embodiment_id.json 確認 `new_embodiment: 10`)。
+- `--modality-config-path` 指向 bimanual config(.py),讓 server 知道 12 維怎麼切、3 相機怎麼對。
+  **省略且該 tag 沒內建 modality config → server 會報錯要你補這個。**
+- 看到 `Server is ready and listening on tcp://...:5555` 才算起好,再開終端機 B。
+
+> ⚠️ **單 GPU 要注意 VRAM**:server(policy 推論)和 Isaac Sim(渲染+物理)同一張卡會搶記憶體。
+> 多卡可用 `--device cuda:1` 把 server 丟到另一張。
+> port 被占(`Address already in use`)→ server 加 `--port 5556`,client 也帶 `--policy_port 5556`。
+
+## B. 跑 eval(終端機 B:`source ~/env_isaaclab/bin/activate`)
+
+```bash
+# 乾淨場景評估(10 集)
+lerobot_eval_dual \
+  --task Lerobot-So101-Dual-Vials-To-Rack-Eval \
+  --num_episodes 10 \
+  --policy_host localhost --policy_port 5555
+
+# DR 場景評估(外觀隨機,較嚴格)
+lerobot_eval_dual --task Lerobot-So101-Dual-Vials-To-Rack-DR-Eval --num_episodes 10
+
+# 加 --rerun 開 Rerun 視覺化(看 policy 收到的畫面 + 動作)
+```
+
+**成功判定(dual-safe)**:所有「啟用中」試管(沒被 `hide_random_vials` 藏掉的)都同時放進中央架、
+且連續 25 步維持(直立、在架子範圍內、已放開),episode 才算成功並提前結束;超過 7.5 分鐘則 time_out。
+被藏起來的試管不計入 → 天然支援隨機 1~4 支。
+
+**跑完會印**:`Success Rate: <成功數>/<總集數> (<%>)`。
+
+> ⚠️ server 的 modality/embodiment 一定要對上訓練設定,否則維度或語意對不上、動作會亂。
+> 若 rollout 看起來完全不動或亂飛,先確認 server 這端的 `--modality-config-path` 與 `--embodiment-tag`。

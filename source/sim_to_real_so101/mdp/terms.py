@@ -12,6 +12,8 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+import os
+
 import torch
 
 from pxr import Gf, Sdf
@@ -413,4 +415,133 @@ def vial_placed_on_rack_termination(
     #     print(f"[RACK CONFIRM] success confirmed in env(s): {torch.where(confirmed)[0].tolist()}")
 
     return confirmed
+
+
+def all_active_vials_placed_termination(
+    env: ManagerBasedRLEnv,
+    contact_sensor_cfgs,
+    vials: list[str],
+    rack_name: str,
+    force_threshold: float = 2.0,
+    rack_local_x_min: float = 0.0,
+    rack_local_x_max: float = 0.12,
+    rack_local_y_min: float = 0.0,
+    rack_local_y_max: float = 0.12,
+    rack_local_z_max: float = 0.1,
+    vertical_threshold: float = 0.7,
+    active_radius: float = 1.0,
+    confirm_steps: int = 25,
+) -> torch.Tensor:
+    """雙臂協作式成功判定：所有「啟用中」的試管都同時放進共用架。
+
+    與單臂 :func:`vial_placed_on_rack_termination` 的差異：
+
+    * **跨左右兩個 contact sensor** 判斷「試管是否正被夾住」——任一夾爪對該試管
+      有接觸力就算被夾（協作式任務任一臂都可能拿任一支）。
+    * 成功條件是 **「所有啟用中的試管都在架上」**（而非單臂的「任一支放上去」）。
+      「啟用中」= 沒被 :func:`hide_random_vials` 搬到場外的試管
+      （場外約 2 m，用離 env 原點的水平距離判定）→ 天然支援 Phase 4B 的
+      隨機 1~4 支：被藏起來的試管不計入成功條件。
+    * 幾何準則（直立、在架子 local 範圍內、已放開）與 ``vial_placed_on_rack``
+      觀測一致，確保 eval 成功判定與錄製時的 subtask 訊號同標準。
+    * 需連續 ``confirm_steps`` 步都成立才回報成功；中途任一試管被撞出/被夾起
+      就把計數歸零，避免「路過架子上方」誤判。
+
+    Args:
+        contact_sensor_cfgs: 左右夾爪 contact sensor 的 SceneEntityCfg（tuple/list，
+            兩者的 filter 順序都須等於 ``vials``）。
+        vials: 場景中全部試管名稱（順序對齊 contact sensor 的 filter）。
+        rack_name: 共用試管架的 scene 物件名。
+        active_radius: 離 env 原點水平距離小於此值才算「啟用中」（用來排除被藏到
+            場外的試管）。
+
+    Returns:
+        Boolean tensor，shape ``(num_envs,)``，成功即 True（作為 terminated）。
+    """
+    num_envs = env.num_envs
+    device = env.device
+
+    # --- 每支試管是否正被任一夾爪夾住（跨左右 sensor 取 OR）---
+    grasped_now = torch.zeros(num_envs, len(vials), dtype=torch.bool, device=device)
+    for cfg in contact_sensor_cfgs:
+        contact_sensor: ContactSensor = env.scene[cfg.name]
+        force_norm = torch.linalg.vector_norm(contact_sensor.data.force_matrix_w, dim=-1)
+        per_filter = force_norm.sum(dim=1)  # (num_envs, n_filter)，filter 順序 = vials
+        grasped_now |= per_filter > force_threshold
+
+    # --- 架子座標系 ---
+    rack_obj: RigidObject = env.scene[rack_name]
+    rack_pos_w = rack_obj.data.root_pos_w
+    rack_quat_inv = math_utils.quat_inv(rack_obj.data.root_quat_w)
+    unit_z = torch.zeros(num_envs, 3, device=device)
+    unit_z[:, 2] = 1.0
+    env_origins = env.scene.env_origins
+
+    active = torch.zeros(num_envs, len(vials), dtype=torch.bool, device=device)
+    on_rack = torch.zeros(num_envs, len(vials), dtype=torch.bool, device=device)
+    for i, vial_name in enumerate(vials):
+        vial_obj: RigidObject = env.scene[vial_name]
+        vial_pos_w = vial_obj.data.root_pos_w
+        vial_quat_w = vial_obj.data.root_quat_w
+
+        # 啟用中 = 沒被搬到場外（hide_random_vials 把藏起來的停在離原點 ~2 m）
+        rel = vial_pos_w - env_origins
+        active[:, i] = (torch.abs(rel[:, 0]) < active_radius) & (
+            torch.abs(rel[:, 1]) < active_radius
+        )
+
+        # 在架上判定（與 vial_placed_on_rack 觀測同準則）
+        vial_up_world = math_utils.quat_apply(vial_quat_w, unit_z)
+        is_vertical = torch.abs(vial_up_world[:, 2]) > vertical_threshold
+        local = math_utils.quat_apply(rack_quat_inv, vial_pos_w - rack_pos_w)
+        x_ok = (local[:, 0] >= rack_local_x_min) & (local[:, 0] <= rack_local_x_max)
+        y_ok = (local[:, 1] >= rack_local_y_min) & (local[:, 1] <= rack_local_y_max)
+        z_ok = local[:, 2] < rack_local_z_max
+        on_rack[:, i] = is_vertical & x_ok & y_ok & z_ok & (~grasped_now[:, i])
+
+    any_active = active.any(dim=1)
+    # 成功 = 至少有一支啟用中，且沒有任何「啟用中卻不在架上」的試管
+    all_placed = any_active & (~(active & ~on_rack)).all(dim=1)
+
+    # --- 連續確認 confirm_steps 步（reset 當下歸零）---
+    if not hasattr(env, "_dual_rack_success_counter"):
+        env._dual_rack_success_counter = torch.zeros(
+            num_envs, dtype=torch.long, device=device
+        )
+    env._dual_rack_success_counter[env.episode_length_buf <= 1] = 0
+    env._dual_rack_success_counter = torch.where(
+        all_placed,
+        env._dual_rack_success_counter + 1,
+        torch.zeros_like(env._dual_rack_success_counter),
+    )
+
+    # --- opt-in 診斷（DUAL_EVAL_DEBUG=1）：印 env0 的 per-vial active/on_rack ---
+    if os.environ.get("DUAL_EVAL_DEBUG"):
+        step = int(env.episode_length_buf[0].item())
+        placed_change = bool(on_rack[0].any()) or bool(all_placed[0])
+        if step % 30 == 0 or placed_change:
+            rel0 = (env.scene[vials[0]].data.root_pos_w - env_origins)[0]  # noqa: F841
+            act = active[0].tolist()
+            onr = on_rack[0].tolist()
+            grp = grasped_now[0].tolist()
+            n_active = int(active[0].sum().item())
+            print(
+                f"[DUAL SUCC] step={step} n_active={n_active} "
+                f"active={act} on_rack={onr} grasped={grp} "
+                f"all_placed={bool(all_placed[0])} "
+                f"counter={int(env._dual_rack_success_counter[0].item())}/{confirm_steps}"
+            )
+            # 各試管相對 env 原點的 xy（看誰被 hide 到 ~2m、誰在墊上）
+            for vi, vn in enumerate(vials):
+                p = (env.scene[vn].data.root_pos_w - env_origins)[0]
+                lp = math_utils.quat_apply(
+                    rack_quat_inv, env.scene[vn].data.root_pos_w - rack_pos_w
+                )[0]
+                print(
+                    f"    {vn}: world_rel_xy=({p[0]:.2f},{p[1]:.2f}) "
+                    f"rack_local=({lp[0]:.3f},{lp[1]:.3f},{lp[2]:.3f}) "
+                    f"active={act[vi]} on_rack={onr[vi]}"
+                )
+
+    return env._dual_rack_success_counter >= confirm_steps
 

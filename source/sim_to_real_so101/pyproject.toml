@@ -13,6 +13,11 @@ authors = [
     { name="Zhijin Li", email="zhijinl@nvidia.com" }
 ]
 requires-python = ">=3.11"
+# 這個環境（Isaac Lab + lerobot）大多依賴已預裝；此處只補環境沒有、eval client 需要的:
+#   msgpack-numpy —— 解 GR00T server 回傳的 msgpack_numpy 編碼 action ndarray（見 gr00t_client/server_client.py）
+dependencies = [
+    "msgpack-numpy",
+]
 
 [project.scripts]
 list_envs = "sim_to_real_so101.scripts.list_envs:main"
@@ -21,4 +26,5 @@ random_agent = "sim_to_real_so101.scripts.random_agent:main"
 lerobot_agent = "sim_to_real_so101.scripts.lerobot_agent:main"
 lerobot_agent_dual = "sim_to_real_so101.scripts.lerobot_agent_dual:main"
 lerobot_eval = "sim_to_real_so101.scripts.lerobot_eval:main"
+lerobot_eval_dual = "sim_to_real_so101.scripts.lerobot_eval_dual:main"
 lerobot_push_dataset = "sim_to_real_so101.scripts.lerobot_push_dataset:main"

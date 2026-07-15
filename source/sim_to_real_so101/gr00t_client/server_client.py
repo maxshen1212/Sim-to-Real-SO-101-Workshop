@@ -17,6 +17,7 @@ import io
 from typing import Any, Callable
 
 import msgpack
+import msgpack_numpy as mnp
 import numpy as np
 import zmq
 
@@ -43,7 +44,10 @@ class MsgSerializer:
             return ModalityConfig(**obj["as_json"])
         if "__ndarray_class__" in obj:
             return np.load(io.BytesIO(obj["as_npy"]), allow_pickle=False)
-        return obj
+        # GR00T 官方 server 用 msgpack_numpy 編碼一般 ndarray（keys 為 bytes b"nd"/b"data"…）,
+        # 它與這裡的 __ndarray_class__ 不同標記 → 用 mnp.decode 收尾把 action ndarray 解回來。
+        # 非 ndarray 的一般 dict 會原樣回傳,不影響 ModalityConfig 等其他分支。
+        return mnp.decode(obj)
 
     @staticmethod
     def encode_custom_classes(obj):

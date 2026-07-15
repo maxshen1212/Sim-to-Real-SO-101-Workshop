@@ -480,6 +480,163 @@ class GR00TRemotePolicy:
         return sim_action
 
 
+class GR00TDualRemotePolicy:
+    """雙臂版 GR00T remote policy（12 維 state/action，對齊 SO101_bimanual modality）。
+
+    結構上就是 :class:`GR00TRemotePolicy` × 2：持有左右兩個
+    :class:`LeRobotSO101Interface`（每臂 6 維、mapping 相同），把 sim 觀測組成
+    modality.json 定義的分組再送 server，server 回來的 action 拆回左右各 6 維、
+    concat 成 12 維（左 0:6、右 6:12，對齊 dual env 的 action 空間）。
+
+    state/action 分組（見 examples/SO101_bimanual/modality.json）::
+
+        left_arm[0:5]  left_gripper[5:6]  right_arm[6:11]  right_gripper[11:12]
+
+    相機（video）key：``center`` / ``wrist_left`` / ``wrist_right``——與 sim 的
+    ``rgb_center`` / ``rgb_wrist_left`` / ``rgb_wrist_right`` 去掉 ``rgb_`` 前綴後
+    完全對上，不需 rename_map。
+
+    注意：與單臂一樣，arm 是 RELATIVE、gripper 是 ABSOLUTE，但 server 端已把
+    relative 還原成絕對關節目標，client 直接拿 action 值 map 即可（不用加回 state）。
+    """
+
+    def __init__(
+        self,
+        left_iface: "LeRobotSO101Interface",
+        right_iface: "LeRobotSO101Interface",
+        camera_names: list[str],
+        host: str = "localhost",
+        port: int = 5555,
+        action_horizon: int = 16,
+        lang_instruction: str = "pick up the vials and place them into the rack",
+    ):
+        self._left = left_iface
+        self._right = right_iface
+        self._camera_names = camera_names
+        self._host = host
+        self._port = port
+        self._action_horizon = action_horizon
+        self._lang_instruction = lang_instruction
+        self._action_queue: deque = deque()
+        self._client = None
+
+    def connect(self):
+        from sim_to_real_so101.gr00t_client.server_client import PolicyClient
+
+        print(f"[INFO]: Connecting to GR00T policy server at {self._host}:{self._port}...")
+        self._client = PolicyClient(host=self._host, port=self._port)
+        if not self._client.ping():
+            raise RuntimeError("Cannot connect to GR00T policy server!")
+        print("[INFO]: Policy server connected")
+
+    def reset(self):
+        self._client.reset()
+        self._action_queue.clear()
+
+    # ------------------------------------------------------------------
+    # Observation conversion
+    # ------------------------------------------------------------------
+
+    def _sim_obs_to_groot_inputs(
+        self,
+        joint_pos_left: torch.Tensor,
+        joint_pos_right: torch.Tensor,
+        visual_obs: dict,
+    ) -> dict:
+        """把 sim 觀測轉成 GR00T VLA 輸入（12 維雙臂分組 + 3 相機）。"""
+        left_raw = self._left.get_raw_actions_from_radians(joint_pos_left)
+        right_raw = self._right.get_raw_actions_from_radians(joint_pos_right)
+        left_np = left_raw.cpu().numpy().astype(np.float32)
+        right_np = right_raw.cpu().numpy().astype(np.float32)
+
+        model_obs = {"video": {}}
+        for camera in self._camera_names:
+            model_obs["video"][camera] = visual_obs[f"rgb_{camera}"][0].cpu().numpy()
+
+        model_obs["state"] = {
+            "left_arm": left_np[:5],
+            "left_gripper": left_np[5:6],
+            "right_arm": right_np[:5],
+            "right_gripper": right_np[5:6],
+        }
+
+        model_obs["language"] = {
+            "annotation.human.task_description": self._lang_instruction,
+        }
+
+        # (B=1, T=1) leading dims
+        model_obs = GR00TRemotePolicy._add_batch_time_dims(model_obs)
+        model_obs = GR00TRemotePolicy._add_batch_time_dims(model_obs)
+        return model_obs
+
+    # ------------------------------------------------------------------
+    # Action decoding
+    # ------------------------------------------------------------------
+
+    def _decode_action_chunk(self, action_chunk: dict) -> list[tuple[dict, dict]]:
+        """把 GR00T action chunk 拆成每一步的 (左臂 dict, 右臂 dict)。"""
+        T = action_chunk["left_arm"].shape[1]
+        horizon = min(T, self._action_horizon)
+        joint_order = self._left.SO101_JOINT_ORDER  # 左右相同
+
+        decoded = []
+        for t in range(horizon):
+            left_full = np.concatenate(
+                [action_chunk["left_arm"][0][t], action_chunk["left_gripper"][0][t]],
+                axis=0,
+            )  # (6,)
+            right_full = np.concatenate(
+                [action_chunk["right_arm"][0][t], action_chunk["right_gripper"][0][t]],
+                axis=0,
+            )  # (6,)
+            left_dict = {name: float(left_full[i]) for i, name in enumerate(joint_order)}
+            right_dict = {name: float(right_full[i]) for i, name in enumerate(joint_order)}
+            decoded.append((left_dict, right_dict))
+        return decoded
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+
+    def get_action(
+        self,
+        joint_pos_left: torch.Tensor,
+        joint_pos_right: torch.Tensor,
+        visual_obs: dict,
+        log: bool = False,
+    ) -> torch.Tensor:
+        """回傳下一步 12 維 sim action（radians，左 0:6、右 6:12）。"""
+        if len(self._action_queue) == 0:
+            model_input = self._sim_obs_to_groot_inputs(
+                joint_pos_left, joint_pos_right, visual_obs
+            )
+            action_chunk, _info = self._client.get_action(model_input)
+            self._action_queue.extend(self._decode_action_chunk(action_chunk))
+
+        left_dict, right_dict = self._action_queue.popleft()
+
+        left_raw = self._left.get_raw_actions_tensor(left_dict)
+        right_raw = self._right.get_raw_actions_tensor(right_dict)
+        left_sim = self._left.get_mapped_actions_vectorized(left_raw)
+        right_sim = self._right.get_mapped_actions_vectorized(right_raw)
+        sim_action = torch.cat([left_sim, right_sim], dim=0)  # (12,)
+
+        if log:
+            obs_log = {}
+            for camera in self._camera_names:
+                obs_log[camera] = visual_obs[f"rgb_{camera}"][0].cpu().numpy()
+            left_state = self._left.get_raw_actions_from_radians(joint_pos_left).cpu().numpy()
+            right_state = self._right.get_raw_actions_from_radians(joint_pos_right).cpu().numpy()
+            for i, joint in enumerate(self._left.SO101_JOINT_ORDER):
+                obs_log[f"left_{joint}"] = float(left_state[i])
+                obs_log[f"right_{joint}"] = float(right_state[i])
+            action_log = {f"left_{k}": v for k, v in left_dict.items()}
+            action_log.update({f"right_{k}": v for k, v in right_dict.items()})
+            log_rerun_data(observation=obs_log, action=action_log)
+
+        return sim_action
+
+
 class DummyDatasetMeta:
     def __init__(self, features, robot_type):
         self.features = features

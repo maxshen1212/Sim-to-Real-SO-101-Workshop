@@ -78,6 +78,10 @@ import isaaclab_tasks  # noqa: F401
 from isaaclab_tasks.utils import parse_env_cfg
 
 import sim_to_real_so101.tasks  # noqa: F401
+from sim_to_real_so101.tasks.so101_dual_vials_env_cfg import (
+    DUAL_LEFT_START_POSE,
+    DUAL_RIGHT_START_POSE,
+)
 from sim_to_real_so101.utils.keyboard import KeyboardControl
 from sim_to_real_so101.utils.lerobot_interface import (
     LeRobotSO101Interface,
@@ -153,13 +157,13 @@ def main():
     obs, _ = env.reset()
     policy.reset()
 
-    # 12 維 action（左 0:6、右 6:12）；warmup 用一個中性 rest pose（左右相同）
+    # 12 維 action（左 0:6、右 6:12）。warmup 命令的姿態要跟 env reset 的起始姿態一致，
+    # 否則手臂在 warmup 就開始移動、第一格 obs 又偏離訓練分布。這兩組常數就是 reset 用的
+    # 資料集起始姿態（見 tasks/so101_dual_vials_env_cfg.py），左右各一組。
     actions = torch.zeros(env.action_space.shape, device=env.unwrapped.device)
-    arm_rest = torch.tensor(
-        [-0.2736, -0.6109, -0.0745, 1.5148, -1.6034, -0.1465],
-        device=env.unwrapped.device,
-    )
-    initial_action = torch.cat([arm_rest, arm_rest], dim=0)  # (12,)
+    left_rest = torch.tensor(DUAL_LEFT_START_POSE, device=env.unwrapped.device)
+    right_rest = torch.tensor(DUAL_RIGHT_START_POSE, device=env.unwrapped.device)
+    initial_action = torch.cat([left_rest, right_rest], dim=0)  # (12,)
 
     step = 0
     num_episodes = 0

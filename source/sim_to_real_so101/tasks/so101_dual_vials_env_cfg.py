@@ -53,6 +53,7 @@ from sim_to_real_so101.assets.so101 import (
     SO101_DUAL_RIGHT_CONTACT_CFG,
 )
 from sim_to_real_so101.mdp import (
+    reset_joints_to_pose,
     reset_vials_rack,
     hide_random_vials,
     any_vial_grasped,
@@ -70,6 +71,7 @@ from sim_to_real_so101.mdp import (
     randomize_camera_pose,
 )
 
+from .so101_dual_env_cfg import SO101_JOINTS
 from .so101_dual_task_env_cfg import (
     SO101DualTaskSceneCfg,
     SO101DualTaskEnvCfg,
@@ -502,28 +504,60 @@ class SO101DualVialsTerminationsCfg:
 # episode 超時上限（單位：秒！不是分鐘，也不要除 60）。
 # 錄的示範平均 ~34 秒/集；給 ~5x 餘裕當 timeout（放不完就走 time_out 進下一集）。
 # 想更寬鬆就調大、想 eval 快就調小（失敗的 episode 會一直跑到這個秒數才結束）。
-EVAL_EPISODE_LENGTH_S = 180.0
+EVAL_EPISODE_LENGTH_S = 1350 / 60
+
+
+# eval 起始姿態（弧度，SO101_JOINTS 順序：Rotation, Pitch, Elbow, Wrist_Pitch, Wrist_Roll, Jaw）。
+# 取自錄製資料集 datasets/bimanual-so101-pickvials 240 集第一格的中位姿態，換算成 sim 弧度。
+# 目的：讓 eval reset 的開機姿態落在訓練分布內，policy 第一步才不會在分布外亂動。
+# （warmup 也用同一組值，見 scripts/lerobot_eval_dual.py，一處定義兩處共用。）
+DUAL_LEFT_START_POSE = [-0.0425, -1.7256, 1.5708, -1.6437, -1.6648, -0.1573]
+DUAL_RIGHT_START_POSE = [-0.0009, -1.7274, 1.5702, -1.6126, -1.6469, -0.1348]
+
+
+def _use_dataset_start_pose(events) -> None:
+    """把左右臂的 reset 從『USD 預設姿態』換成『資料集起始姿態』（絕對重設）。
+
+    只在 eval cfg 呼叫，錄製/訓練用的 base 環境不受影響。
+    preserve_order=True 確保 joint_ids 與 target_pos 同序（見 reset_joints_to_pose 說明）。
+    """
+    events.reset_robot_left.func = reset_joints_to_pose
+    events.reset_robot_left.params = {
+        "asset_cfg": SceneEntityCfg("robot_left", joint_names=SO101_JOINTS, preserve_order=True),
+        "target_pos": DUAL_LEFT_START_POSE,
+    }
+    events.reset_robot_right.func = reset_joints_to_pose
+    events.reset_robot_right.params = {
+        "asset_cfg": SceneEntityCfg("robot_right", joint_names=SO101_JOINTS, preserve_order=True),
+        "target_pos": DUAL_RIGHT_START_POSE,
+    }
 
 
 @configclass
 class SO101DualVialsEvalEnvCfg(SO101DualVialsEnvCfg):
     """乾淨場景 + 終止條件（評估純 sim policy）。固定 4 支、episode 上限 180 秒。"""
 
-    terminations: SO101DualVialsTerminationsCfg = SO101DualVialsTerminationsCfg()
+    terminations: SO101DualVialsTerminationsCfg = (
+        SO101DualVialsTerminationsCfg()
+    )
 
     def __post_init__(self) -> None:
         super().__post_init__()
         self.episode_length_s = EVAL_EPISODE_LENGTH_S  # 秒；success 會提前結束
         self.events.reset_hide_vials = None  # eval 固定 4 支，不隨機藏
+        _use_dataset_start_pose(self.events)  # 開機姿態對齊訓練資料
 
 
 @configclass
 class SO101DualVialsEvalDREnvCfg(SO101DualVialsDREnvCfg):
     """DR 場景 + 終止條件（最嚴格：外觀隨機 + 評估）。固定 4 支、episode 上限 180 秒。"""
 
-    terminations: SO101DualVialsTerminationsCfg = SO101DualVialsTerminationsCfg()
+    terminations: SO101DualVialsTerminationsCfg = (
+        SO101DualVialsTerminationsCfg()
+    )
 
     def __post_init__(self) -> None:
         super().__post_init__()
         self.episode_length_s = EVAL_EPISODE_LENGTH_S  # 秒；success 會提前結束
         self.events.reset_hide_vials = None  # eval 固定 4 支，不隨機藏
+        _use_dataset_start_pose(self.events)  # 開機姿態對齊訓練資料

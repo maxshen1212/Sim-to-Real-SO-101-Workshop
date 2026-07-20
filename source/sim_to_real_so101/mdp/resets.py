@@ -495,3 +495,45 @@ def hide_random_vials(
         pose = torch.cat([pos, quat], dim=-1)
         v.write_root_pose_to_sim(pose, env_ids=env_subset)
         v.write_root_velocity_to_sim(torch.zeros((k, 6), device=v.device), env_ids=env_subset)
+
+
+def reset_joints_to_pose(
+    env,
+    env_ids: torch.Tensor,
+    target_pos: list[float],
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+    position_range: tuple[float, float] = (0.0, 0.0),
+    velocity_range: tuple[float, float] = (0.0, 0.0),
+):
+    """把選定關節「絕對」重設到 target_pos（弧度），不參照 USD 的預設姿態。
+
+    對照 isaaclab 內建的 reset_joints_by_offset：那個是「USD 預設姿態 + 偏移」，起始姿態
+    會被 USD 的 init pose 綁死。這個版本直接寫入絕對目標姿態，讓起始姿態由呼叫端（task cfg）
+    決定，與 USD init pose 脫鉤——用於讓 eval 的開機姿態對齊訓練資料集的起始姿態。
+
+    target_pos 依 asset_cfg.joint_names 的順序給值。asset_cfg 請設 preserve_order=True，
+    這樣 joint_ids 會維持 joint_names 的順序、與 target_pos 一一對應（否則 joint_ids 會被
+    排序，導致對位錯亂）。
+
+    position_range / velocity_range 為選用：在目標值附近加均勻噪聲，可複刻錄製時的自然變異；
+    預設 (0, 0) 即固定姿態。
+    """
+    asset: Articulation = env.scene[asset_cfg.name]
+
+    # target_pos 展開成 (欲重設的環境數, 關節數)
+    target = torch.tensor(target_pos, dtype=torch.float32, device=asset.device)
+    joint_pos = target.unsqueeze(0).repeat(len(env_ids), 1)
+    joint_vel = torch.zeros_like(joint_pos)
+
+    # 選用：在目標姿態附近加均勻噪聲
+    joint_pos += math_utils.sample_uniform(*position_range, joint_pos.shape, joint_pos.device)
+    joint_vel += math_utils.sample_uniform(*velocity_range, joint_vel.shape, joint_vel.device)
+
+    # 夾到關節上下限，避免噪聲把姿態推出可動範圍
+    joint_limits = asset.data.soft_joint_pos_limits[env_ids][:, asset_cfg.joint_ids]
+    joint_pos = joint_pos.clamp_(joint_limits[..., 0], joint_limits[..., 1])
+
+    # 寫進物理引擎
+    asset.write_joint_state_to_sim(
+        joint_pos, joint_vel, joint_ids=asset_cfg.joint_ids, env_ids=env_ids
+    )

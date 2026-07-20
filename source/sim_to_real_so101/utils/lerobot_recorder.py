@@ -373,7 +373,12 @@ class LeRobotRecorder:
                         self.save_rgb_video(rgb_frames, camera_name, this_episode_index)
                         self.save_instance_id_segmentation_video(instance_id_seg_frames, camera_name, this_episode_index)
 
-                self.dataset.save_episode()
+                # parallel_encoding=False：不要用 ProcessPoolExecutor(fork) 平行編碼。
+                # 預設 True 會為每個相機 fork 一個子行程，但本行程載了 Isaac Sim（~180 執行緒），
+                # fork 只複製呼叫緒、其餘緒持有的 mutex 在子行程永遠解不開 → 子行程死鎖在 futex，
+                # 主行程退化成序列硬編、慢一個數量級甚至卡死（見 [[dataset-bimanual-recording-workflow]]）。
+                # 改成主行程內序列編碼：不 fork = 不死鎖，輸出仍是 AV1、格式與既有資料完全一致。
+                self.dataset.save_episode(parallel_encoding=False)
                 self.dataset.finalize()
                 self._init_existing_dataset()
 

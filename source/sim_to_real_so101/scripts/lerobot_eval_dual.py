@@ -53,6 +53,21 @@ parser.add_argument(
     help="Language instruction for the policy",
 )
 parser.add_argument("--rerun", action="store_true", default=False, help="Enable Rerun visualization")
+parser.add_argument(
+    "--record_video",
+    action="store_true",
+    default=False,
+    help="Record camera_center (俯視) 每個 episode 一支 mp4，供 demo 用。",
+)
+parser.add_argument(
+    "--video_dir",
+    type=str,
+    default="./eval_videos",
+    help="錄影輸出資料夾（--record_video 時生效）。",
+)
+parser.add_argument(
+    "--video_fps", type=int, default=30, help="錄影 mp4 的 fps。"
+)
 
 # append AppLauncher cli args
 AppLauncher.add_app_launcher_args(parser)
@@ -70,9 +85,20 @@ simulation_app = app_launcher.app
 """Rest everything follows."""
 
 
+import os
+
 import gymnasium as gym
 import numpy as np
 import torch
+
+
+def _to_uint8_frame(cam_obs: torch.Tensor) -> np.ndarray:
+    """把單張相機觀測 (num_envs, H, W, 3) 轉成 env 0 的 HWC uint8 numpy frame。"""
+    img = cam_obs[0].detach().to("cpu")
+    if img.dtype != torch.uint8:
+        # normalize=False 時是 0~255 的 float；保險起見再 clip 一次
+        img = img.clamp(0, 255).round().to(torch.uint8)
+    return img.numpy()
 
 import isaaclab_tasks  # noqa: F401
 from isaaclab_tasks.utils import parse_env_cfg
@@ -153,6 +179,23 @@ def main():
     )
     policy.connect()
 
+    # 錄影設定：只錄 camera_center 俯視（headless demo 用）。
+    record_video = args_cli.record_video
+    video_cam_key = "rgb_center"
+    if record_video:
+        os.makedirs(args_cli.video_dir, exist_ok=True)
+        print(f"[INFO]: Recording camera_center to {os.path.abspath(args_cli.video_dir)}")
+    frames = []  # 累積當前 episode 的 frame
+
+    def _write_video(ep_idx: int, success: bool) -> None:
+        if not record_video or len(frames) == 0:
+            return
+        import imageio.v2 as imageio
+        tag = "success" if success else "fail"
+        path = os.path.join(args_cli.video_dir, f"ep{ep_idx:03d}_{tag}.mp4")
+        imageio.mimwrite(path, frames, fps=args_cli.video_fps, macro_block_size=1)
+        print(f"[INFO]: Saved {path} ({len(frames)} frames)")
+
     # reset environment
     obs, _ = env.reset()
     policy.reset()
@@ -194,6 +237,9 @@ def main():
 
             obs, rewards, terminated, truncated, info = env.step(actions)
 
+            if record_video and video_cam_key in obs["visual"]:
+                frames.append(_to_uint8_frame(obs["visual"][video_cam_key]))
+
             step += 1
 
             if pbar is not None:
@@ -208,9 +254,13 @@ def main():
                     pbar = None
 
                 num_episodes += 1
-                if is_terminated and not is_truncated:
+                episode_success = is_terminated and not is_truncated
+                if episode_success:
                     num_successes += 1
                 success_rate = (num_successes / num_episodes) * 100
+
+                _write_video(num_episodes, episode_success)
+                frames.clear()
 
                 obs, _ = env.reset()
                 policy.reset()
@@ -224,6 +274,7 @@ def main():
                     pbar.close()
                     pbar = None
                 print(f"[MANUAL RESET] Episode interrupted at step {step}")
+                frames.clear()  # 手動中斷的 episode 不存
                 obs, _ = env.reset()
                 policy.reset()
                 step = 0

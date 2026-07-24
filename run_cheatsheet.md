@@ -1,74 +1,3 @@
-# Single Arm
-
-```bash
-
-lerobot-find-port
-
-export TELEOP_PORT=/dev/ttyACM0
-export TELEOP_ID=orange_teleop
-
-export ROBOT_PORT=/dev/ttyACM2
-export ROBOT_ID=orange_robot
-
-echo "Teleop port is $TELEOP_PORT with id $TELEOP_ID"
-echo "Robot port is $ROBOT_PORT with id $ROBOT_ID"
-
-sudo chmod 666 /dev/ttyACM0
-sudo chmod 666 /dev/ttyACM2
-
-sudo chmod -R 777 /home/max/.cache/huggingface/lerobot/
-sudo chmod -R 777 /home/air-420/.cache/huggingface/lerobot/
-
-lerobot-calibrate \
-    --teleop.type=so101_leader \
-    --teleop.port=$TELEOP_PORT \
-    --teleop.id=$TELEOP_ID
-
-lerobot-calibrate \
-    --robot.type=so101_follower \
-    --robot.port=$ROBOT_PORT \
-    --robot.id=$ROBOT_ID
-
-python docker/real/scripts/so101_check_calibration.py
-
-lerobot-find-cameras opencv
-
-export CAMERA_GRIPPER=6
-export CAMERA_EXTERNAL=12
-
-lerobot-teleoperate \
-  --robot.type=so101_follower \
-  --robot.port=$ROBOT_PORT \
-  --robot.id=$ROBOT_ID \
-  --teleop.type=so101_leader \
-  --teleop.port=$TELEOP_PORT \
-  --teleop.id=$TELEOP_ID \
-  --display_data=true \
-  --robot.cameras='{
-    "wrist": {
-      "type": "opencv",
-      "index_or_path": '"$CAMERA_GRIPPER"',
-      "width": 640,
-      "height": 480,
-      "fps": 30
-    },
-    "front": {
-      "type": "opencv",
-      "index_or_path": '"$CAMERA_EXTERNAL"',
-      "width": 640,
-      "height": 480,
-      "fps": 30
-    }
-  }'
-
-lerobot_agent --task Lerobot-So101-Teleop-Vials-To-Rack-DR
-
-lerobot_agent --task Lerobot-So101-Teleop-Vials-To-Rack-DR \
-    --repo_id ${HF_USER}/so101_teleop_vials \
-    --repo_root $(pwd)/datasets/so101_teleop_vials \
-    --task_name "Pick up the vial and place it in the rack"
-```
-
 # Bimanual(雙臂:設定 port → 校正 → 錄製 → 上傳 → 檢查)
 
 雙臂用**兩支 SO-101 leader** 驅動 sim,收 12 維(`left_*`/`right_*`)state/action + 3 相機。
@@ -87,7 +16,7 @@ lerobot-find-port          # 拔插左臂 → 記下它的 /dev/ttyACM?
 lerobot-find-port          # 拔插右臂 → 記下它的 /dev/ttyACM?
 
 export TELEOP_PORT_LEFT=/dev/ttyACM0   TELEOP_ID_LEFT=leader_left
-export TELEOP_PORT_RIGHT=/dev/ttyACM1  TELEOP_ID_RIGHT=leader_right
+export TELEOP_PORT_RIGHT=/dev/ttyACM1  TELEOcP_ID_RIGHT=leader_right
 
 echo "LEFT  $TELEOP_PORT_LEFT  id=$TELEOP_ID_LEFT"
 echo "RIGHT $TELEOP_PORT_RIGHT id=$TELEOP_ID_RIGHT"
@@ -237,14 +166,15 @@ state/action 依 `examples/SO101_bimanual/modality.json` 分成
 ```bash
 cd ~/Isaac-GR00T
 
-# 1) 下載 checkpoint-20000(最新;約 6GB。要比較就換成 15000/10000/5000)
+# 1) 下載 checkpoint-50000(最新;約 6GB。要比較就換成 15000/10000/5000)
 uv run hf download ChihHanShen/gr00t-n1.7-so101-bimanual-pickvials \
-  --include "pickvials-n1p7-run1/checkpoint-20000/*" \
+  --include "pickvials-n1p7-run2/checkpoint-20000/*" \
+  --exclude "*global_step*" \
   --local-dir ~/models/bimanual-pickvials
 
 # 2) 起 server,--model-path 指到那個 checkpoint 目錄
 uv run python gr00t/eval/run_gr00t_server.py \
-    --model-path ~/models/bimanual-pickvials/pickvials-n1p7-run1/checkpoint-20000 \
+    --model-path ~/models/bimanual-pickvials/pickvials-n1p7-run2/checkpoint-50000 \
     --embodiment-tag new_embodiment \
     --modality-config-path examples/SO101_bimanual/so101_bimanual_config.py \
     --device cuda:0
@@ -269,7 +199,7 @@ lerobot_eval_dual \
   --policy_host localhost --policy_port 5555
 
 # DR 場景評估(外觀隨機,較嚴格)
-lerobot_eval_dual --task Lerobot-So101-Dual-Vials-To-Rack-DR-Eval --num_episodes 10
+lerobot_eval_dual --task Lerobot-So101-Dual-Vials-To-Rack-DR-Eval --num_episodes 10 --rerun
 
 # 加 --rerun 開 Rerun 視覺化(看 policy 收到的畫面 + 動作)
 ```
@@ -282,3 +212,25 @@ lerobot_eval_dual --task Lerobot-So101-Dual-Vials-To-Rack-DR-Eval --num_episodes
 
 > ⚠️ server 的 modality/embodiment 一定要對上訓練設定,否則維度或語意對不上、動作會亂。
 > 若 rollout 看起來完全不動或亂飛,先確認 server 這端的 `--modality-config-path` 與 `--embodiment-tag`。
+
+## C. 錄 eval 過程當 demo 影片
+
+加 `--record_video`,eval 時把 **`camera_center` 俯視**每一集存成一支 mp4(headless 也能錄,不用開視窗)。
+
+```bash
+# 錄 demo:每集一支 mp4，落在 ./eval_videos/
+lerobot_eval_dual \
+  --task Lerobot-So101-Dual-Vials-To-Rack-Eval \
+  --num_episodes 10 \
+  --record_video --headless
+
+# 自訂輸出資料夾 / fps
+lerobot_eval_dual --task Lerobot-So101-Dual-Vials-To-Rack-Eval \
+  --record_video --video_dir ./demo_out --video_fps 30 --num_episodes 10 --headless
+```
+
+- 檔名帶結果:`ep001_success.mp4` / `ep002_fail.mp4`(成功=所有啟用試管放進架子並提前結束)。
+- 錄的是**中央俯視**(看得到桌面/試管/架子,看不到手臂側面)。錄的畫面 = policy 的中央相機輸入,零額外 render 開銷。
+- 按 `R` 手動中斷的那一集**不存**(丟棄半截)。
+- 每集結束會**同步編碼**,sim 會短暫暫停一兩秒(正常)。
+- 480×640、libx264;相機解析度目前是偶數所以沒問題。要斜角全景 demo 機位要另外加(目前場景只有三台任務相機)。

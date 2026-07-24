@@ -101,7 +101,7 @@ def any_vial_grasped(
     
     for vial_idx, vial_name in enumerate(vials):
         vial: RigidObject = env.scene[vial_name]
-        vial_z = vial.data.root_pos_w[:, 2]  # Z position per environment
+        vial_z = vial.data.root_pos_w.torch[:, 2]  # Z position per environment
         
         has_contact_with_vial = contact_per_filter[:, vial_idx] > force_threshold
         vial_is_lifted = vial_z > min_height
@@ -233,8 +233,8 @@ def vial_placed_on_rack(
 
     # Get rack pose in world frame
     rack_obj: RigidObject = env.scene[rack_name]
-    rack_pos_w = rack_obj.data.root_pos_w       # (num_envs, 3)
-    rack_quat_w = rack_obj.data.root_quat_w     # (num_envs, 4)
+    rack_pos_w = rack_obj.data.root_pos_w.torch       # (num_envs, 3)
+    rack_quat_w = rack_obj.data.root_quat_w.torch     # (num_envs, 4)
     rack_quat_inv = math_utils.quat_inv(rack_quat_w)
 
     any_vial_newly_placed = torch.zeros(num_envs, dtype=torch.bool, device=device)
@@ -245,8 +245,8 @@ def vial_placed_on_rack(
 
     for vial_idx, vial_name in enumerate(vials):
         vial: RigidObject = env.scene[vial_name]
-        vial_pos_w = vial.data.root_pos_w       # (num_envs, 3)
-        vial_quat_w = vial.data.root_quat_w     # (num_envs, 4)
+        vial_pos_w = vial.data.root_pos_w.torch       # (num_envs, 3)
+        vial_quat_w = vial.data.root_quat_w.torch     # (num_envs, 4)
 
         # --- Grasp detection ---
         vial_grasped_now = contact_per_filter[:, vial_idx] > force_threshold
@@ -371,8 +371,8 @@ def vial_placed_on_rack_termination(
         contact_per_filter = contact_force_norm.sum(dim=1)
 
         rack_obj: RigidObject = env.scene[rack_name]
-        rack_pos_w = rack_obj.data.root_pos_w
-        rack_quat_w = rack_obj.data.root_quat_w
+        rack_pos_w = rack_obj.data.root_pos_w.torch
+        rack_quat_w = rack_obj.data.root_quat_w.torch
         rack_quat_inv = math_utils.quat_inv(rack_quat_w)
 
         unit_z = torch.zeros(num_envs, 3, device=device)
@@ -386,8 +386,8 @@ def vial_placed_on_rack_termination(
                 continue
 
             vial_obj: RigidObject = env.scene[vial_name]
-            vial_pos_w = vial_obj.data.root_pos_w
-            vial_quat_w = vial_obj.data.root_quat_w
+            vial_pos_w = vial_obj.data.root_pos_w.torch
+            vial_quat_w = vial_obj.data.root_quat_w.torch
 
             vial_grasped_now = contact_per_filter[:, vial_idx] > force_threshold
             vial_up_world = math_utils.quat_apply(vial_quat_w, unit_z)
@@ -471,8 +471,8 @@ def all_active_vials_placed_termination(
 
     # --- 架子座標系 ---
     rack_obj: RigidObject = env.scene[rack_name]
-    rack_pos_w = rack_obj.data.root_pos_w
-    rack_quat_inv = math_utils.quat_inv(rack_obj.data.root_quat_w)
+    rack_pos_w = rack_obj.data.root_pos_w.torch
+    rack_quat_inv = math_utils.quat_inv(rack_obj.data.root_quat_w.torch)
     unit_z = torch.zeros(num_envs, 3, device=device)
     unit_z[:, 2] = 1.0
     env_origins = env.scene.env_origins
@@ -481,8 +481,8 @@ def all_active_vials_placed_termination(
     on_rack = torch.zeros(num_envs, len(vials), dtype=torch.bool, device=device)
     for i, vial_name in enumerate(vials):
         vial_obj: RigidObject = env.scene[vial_name]
-        vial_pos_w = vial_obj.data.root_pos_w
-        vial_quat_w = vial_obj.data.root_quat_w
+        vial_pos_w = vial_obj.data.root_pos_w.torch
+        vial_quat_w = vial_obj.data.root_quat_w.torch
 
         # 啟用中 = 沒被搬到場外（hide_random_vials 把藏起來的停在離原點 ~2 m）
         rel = vial_pos_w - env_origins
@@ -520,7 +520,7 @@ def all_active_vials_placed_termination(
         step = int(env.episode_length_buf[0].item())
         placed_change = bool(on_rack[0].any()) or bool(all_placed[0])
         if step % 30 == 0 or placed_change:
-            rel0 = (env.scene[vials[0]].data.root_pos_w - env_origins)[0]  # noqa: F841
+            rel0 = (env.scene[vials[0]].data.root_pos_w.torch - env_origins)[0]  # noqa: F841
             act = active[0].tolist()
             onr = on_rack[0].tolist()
             grp = grasped_now[0].tolist()
@@ -533,9 +533,9 @@ def all_active_vials_placed_termination(
             )
             # 各試管相對 env 原點的 xy（看誰被 hide 到 ~2m、誰在墊上）
             for vi, vn in enumerate(vials):
-                p = (env.scene[vn].data.root_pos_w - env_origins)[0]
+                p = (env.scene[vn].data.root_pos_w.torch - env_origins)[0]
                 lp = math_utils.quat_apply(
-                    rack_quat_inv, env.scene[vn].data.root_pos_w - rack_pos_w
+                    rack_quat_inv, env.scene[vn].data.root_pos_w.torch - rack_pos_w
                 )[0]
                 print(
                     f"    {vn}: world_rel_xy=({p[0]:.2f},{p[1]:.2f}) "

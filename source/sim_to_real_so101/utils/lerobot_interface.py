@@ -18,24 +18,28 @@ import numpy as np
 import torch
 import uuid
 
-from lerobot.teleoperators.so101_leader import SO101LeaderConfig
-from lerobot.robots.so101_follower import SO101FollowerConfig
+from lerobot.teleoperators.so_leader import SO101LeaderConfig
+from lerobot.robots.so_follower import SO101FollowerConfig
 
 from lerobot.cameras.opencv import OpenCVCameraConfig
 from lerobot.configs.policies import PreTrainedConfig
-from lerobot.policies.factory import make_policy, make_pre_post_processors
 from lerobot.robots import make_robot_from_config
 from lerobot.processor import make_default_processors
 from lerobot.datasets.pipeline_features import (
     aggregate_pipeline_dataset_features,
     create_initial_features,
 )
-from lerobot.datasets.utils import build_dataset_frame, combine_feature_dicts
+from lerobot.utils.feature_utils import build_dataset_frame, combine_feature_dicts
 from lerobot.utils.constants import OBS_STR
-from lerobot.utils.control_utils import predict_action
-from lerobot.utils.utils import get_safe_torch_device
-from lerobot.policies.utils import make_robot_action
+from lerobot.utils.device_utils import get_safe_torch_device
 from lerobot.utils.visualization_utils import init_rerun, log_rerun_data
+
+# NOTE: `lerobot.policies.*` and `lerobot.common.control_utils` are imported lazily
+# inside the methods that use them (make_policy / predict_action / prediction_to_sim_processor).
+# Reason: importing `lerobot.policies` eagerly loads every policy's modeling module
+# (eo1/smolvla/pi0/...), which requires transformers>=5.4, conflicting with Isaac Lab's
+# pinned transformers==4.57.6. The bimanual record + GR00T-eval workflow never calls those
+# methods, so keeping these imports lazy lets the bridge import cleanly under Isaac's stack.
 
 
 # Ideally, we should make a base class for all robot interfaces,
@@ -171,6 +175,8 @@ class LeRobotSO101Interface:
         self,
         name_or_path: str,
     ):
+        # Lazy import: pulls in lerobot.policies (transformers>=5.4). See top-of-file note.
+        from lerobot.policies.factory import make_policy, make_pre_post_processors
 
         _, self.robot_action_processor, self.robot_observation_processor = (
             make_default_processors()
@@ -251,6 +257,9 @@ class LeRobotSO101Interface:
         return observation_frame
 
     def predict_action(self, observation_frame: dict) -> dict:
+        # Lazy import: lerobot.common.control_utils pulls in lerobot.policies. See top-of-file note.
+        from lerobot.common.control_utils import predict_action
+
         action_values = predict_action(
             observation=observation_frame,
             policy=self.policy,
@@ -266,6 +275,9 @@ class LeRobotSO101Interface:
     def prediction_to_sim_processor(
         self, action_values: dict, observation_frame: dict, log: bool = False
     ) -> dict:
+        # Lazy import: pulls in lerobot.policies (transformers>=5.4). See top-of-file note.
+        from lerobot.policies.utils import make_robot_action
+
         robot_action = make_robot_action(action_values, self.dataset_features)
         robot_action_to_send = self.robot_action_processor((robot_action, None))
 

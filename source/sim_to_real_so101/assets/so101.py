@@ -19,7 +19,7 @@ import numpy as np
 import isaaclab.sim as sim_utils
 from isaaclab.actuators import ImplicitActuatorCfg
 from isaaclab.assets.articulation import ArticulationCfg
-from isaacsim.core.utils.rotations import euler_angles_to_quat
+from sim_to_real_so101.utils.math_compat import euler_angles_to_quat
 
 here = os.path.dirname(os.path.abspath(__file__))
 

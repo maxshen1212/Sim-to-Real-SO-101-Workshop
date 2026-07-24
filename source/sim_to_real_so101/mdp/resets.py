@@ -25,7 +25,21 @@ import isaaclab.utils.math as math_utils
 from isaaclab.sim import get_current_stage
 from isaaclab.managers import SceneEntityCfg
 from isaaclab.assets import Articulation, RigidObject
-from isaacsim.core.prims import XFormPrim
+# Isaac Sim 6.0 replaced the old importable `isaacsim.core.prims.XFormPrim` with
+# `isaacsim.core.experimental.prims.XformPrim` (note the casing), which lives in an extension that
+# is NOT enabled by default, so a plain import raises ModuleNotFoundError. Enable it first. This is
+# safe here because mdp modules are only imported after the simulator app is launched (see the
+# scripts' AppLauncher-first convention), so the Kit extension manager is already available.
+# API deltas handled at the call sites below:
+#   - constructor takes `paths` positionally (not `prim_paths_expr=`)
+#   - get_local_poses() returns warp arrays (converted to torch here)
+#   - set_local_poses(orientations=...) wants list/np.ndarray/wp.array (torch is converted to numpy)
+import omni.kit.app as _omni_kit_app
+
+_omni_kit_app.get_app().get_extension_manager().set_extension_enabled_immediate(
+    "isaacsim.core.experimental.prims", True
+)
+from isaacsim.core.experimental.prims import XformPrim as XFormPrim  # noqa: E402
 
 
 
@@ -146,10 +160,10 @@ def randomize_mat_rotation(
     
     orientations = math_utils.quat_from_euler_xyz(roll, pitch, base_yaw + yaw)
     
-    asset_xform = XFormPrim(prim_paths_expr=asset_prim_path)
-    
+    asset_xform = XFormPrim(asset_prim_path)
+
     with Sdf.ChangeBlock():
-        asset_xform.set_local_poses(orientations=orientations)
+        asset_xform.set_local_poses(orientations=orientations.detach().cpu().numpy())
 
 
 def randomize_camera_focal_length(
@@ -335,10 +349,10 @@ def randomize_sky_light(
         rand_samples[:, 0], rand_samples[:, 1], rand_samples[:, 2]
     )
 
-    asset_xform = XFormPrim(prim_paths_expr=asset_prim_path)
+    asset_xform = XFormPrim(asset_prim_path)
 
     with Sdf.ChangeBlock():
-        asset_xform.set_local_poses(orientations=orientations)
+        asset_xform.set_local_poses(orientations=orientations.detach().cpu().numpy())
         prim = stage.GetPrimAtPath(asset_prim_path)
         if prim.IsValid():
             prim.GetAttribute("inputs:exposure").Set(exposure)
@@ -355,7 +369,7 @@ def random_asset_pose(
         pos_offset
 ):
 
-    root_states = asset.data.default_root_state[env_ids].clone()
+    root_states = asset.data.default_root_state.torch[env_ids].clone()
     pos_offset_list = [pos_offset.get(key, 0.0) for key in ["x", "y", "z"]]
     pos_offset = torch.tensor(pos_offset_list, device=asset.device)
     range_list = [
@@ -398,8 +412,10 @@ def reset_vials_rack(
     ]
 
     rack = env.scene[rack]
-    slots_xform_view = XFormPrim(prim_paths_expr=f"{rack.cfg.prim_path}/Body1/Mesh/top_*")
-    total_slots = len(slots_xform_view.prims)
+    # NOTE: experimental XformPrim treats the path as a *regex* (not a glob like the old API), so the
+    # slot prims top_01..top_04 must be matched with `top_.*`, not the glob `top_*`.
+    slots_xform_view = XFormPrim(f"{rack.cfg.prim_path}/Body1/Mesh/top_.*")
+    total_slots = len(slots_xform_view)
 
     # randomize rack pose
     new_rack_positions, new_rack_orientations = random_asset_pose(env, env_ids, rack, rack_pose_range, {})
@@ -413,7 +429,11 @@ def reset_vials_rack(
         vial_idx = torch.randint(0, len(vial_objects), (1,), device=env.unwrapped.device).item()
         placed_on_rack_indices.append(vial_idx)
     
-    slot_positions_local, slot_orientations_local = slots_xform_view.get_local_poses()
+    # experimental XformPrim.get_local_poses() returns warp arrays; downstream code needs torch
+    # tensors on the env device (uses .unsqueeze/.repeat and math_utils.combine_frame_transforms).
+    _slot_pos_wp, _slot_ori_wp = slots_xform_view.get_local_poses()
+    slot_positions_local = torch.as_tensor(_slot_pos_wp.numpy(), device=env.unwrapped.device)
+    slot_orientations_local = torch.as_tensor(_slot_ori_wp.numpy(), device=env.unwrapped.device)
     # Place selected vials on rack
     for vial_idx in placed_on_rack_indices:
         vial = vial_objects[vial_idx]
@@ -443,7 +463,7 @@ def reset_vials_rack(
     pose_range_z_fixed = {**pose_range, "z": (0.0, 0.0)}
     for i, v in enumerate(vial_objects):
         if i not in placed_on_rack_indices:
-            default_z = v.data.default_root_state[env_ids[0], 2].item()
+            default_z = v.data.default_root_state.torch[env_ids[0], 2].item()
             pos_offset = {"z": fixed_vial_z - default_z}
             _, _ = random_asset_pose(env, env_ids, v, pose_range_z_fixed, pos_offset)
             zero_velocity = torch.zeros((len(env_ids), 6), device=v.device)
@@ -491,7 +511,7 @@ def hide_random_vials(
         pos = torch.tensor(
             [hide_xy[0] + 0.1 * vi, hide_xy[1], hide_z], device=device
         ).unsqueeze(0).repeat(k, 1) + env.scene.env_origins[env_subset]
-        quat = v.data.default_root_state[env_subset][:, 3:7]
+        quat = v.data.default_root_state.torch[env_subset][:, 3:7]
         pose = torch.cat([pos, quat], dim=-1)
         v.write_root_pose_to_sim(pose, env_ids=env_subset)
         v.write_root_velocity_to_sim(torch.zeros((k, 6), device=v.device), env_ids=env_subset)

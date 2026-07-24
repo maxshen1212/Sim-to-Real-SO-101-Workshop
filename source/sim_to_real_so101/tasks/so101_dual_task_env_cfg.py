@@ -38,7 +38,7 @@ from isaaclab.managers import ObservationTermCfg as ObsTerm
 from isaaclab.utils import configclass
 from isaaclab.assets import AssetBaseCfg
 from isaaclab.sensors import TiledCameraCfg
-from isaacsim.core.utils.rotations import euler_angles_to_quat
+from sim_to_real_so101.utils.math_compat import euler_angles_to_quat
 
 from sim_to_real_so101 import assets
 from sim_to_real_so101.mdp import (

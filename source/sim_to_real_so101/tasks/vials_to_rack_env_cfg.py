@@ -42,7 +42,7 @@ from isaaclab.utils import configclass
 from isaaclab.assets import RigidObjectCfg, ArticulationCfg, AssetBaseCfg
 from isaaclab.utils import configclass
 from isaaclab.sensors import ContactSensorCfg
-from isaacsim.core.utils.rotations import euler_angles_to_quat
+from sim_to_real_so101.utils.math_compat import euler_angles_to_quat
 from isaaclab.managers import ObservationGroupCfg as ObsGroup
 from isaaclab.managers import ObservationTermCfg as ObsTerm
 from isaaclab.managers import TerminationTermCfg as DoneTerm

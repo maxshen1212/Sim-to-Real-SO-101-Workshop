@@ -9,8 +9,6 @@
 source ~/env_isaaclab/bin/activate
 ```
 
-> ⚠️ **Isaac Lab 6.x：要 GUI 視窗一定要加 `--viz kit`。** 舊的 `--headless` 已廢棄,現在**預設就是 headless(不開窗)**,不加 `--viz` 只會離屏渲染、看不到畫面。所有下面在 Isaac Sim 裡跑的指令(`zero_agent` / `lerobot_agent_dual` / `lerobot_eval_dual`)都已帶上 `--viz kit`。**遙操作/錄製(`lerobot_agent_dual`)必須有視窗**,因為鍵盤 S/C/R 要靠 Isaac Sim 視窗有焦點才收得到。(`--viz` 可選 `kit,newton,rerun,viser,none`;不需要畫面時省略即可跑更快。)
-
 ## 1. 找 port + 授權(每次插拔都會變,要重跑)
 
 ```bash
@@ -38,10 +36,10 @@ lerobot-calibrate --teleop.type=so101_leader --teleop.port=$TELEOP_PORT_RIGHT --
 
 ```bash
 # 只看場景載入正確(零動作,不需硬體)
-zero_agent --task Lerobot-So101-Dual-Vials-To-Rack --viz kit
+zero_agent --task Lerobot-So101-Dual-Vials-To-Rack
 
 # 兩支 leader 驅動 sim、但不錄(確認左右對、抓放偵測正常)
-lerobot_agent_dual --task Lerobot-So101-Dual-Vials-To-Rack-DR --viz kit
+lerobot_agent_dual --task Lerobot-So101-Dual-Vials-To-Rack-DR
 ```
 
 ## 4. 錄製(三個 repo 參數都給才會啟用錄製;要 depth 加 --depth)
@@ -51,8 +49,7 @@ lerobot_agent_dual \
   --task Lerobot-So101-Dual-Vials-To-Rack \
   --repo_id  ChihHanShen/bimanual-so101-pickvials \
   --repo_root $(pwd)/datasets/bimanual-so101-pickvials \
-  --task_name "Pick up the vials and place them into the rack" \
-  --viz kit
+  --task_name "Pick up the vials and place them into the rack"
 ```
 
 錄製時鍵盤(焦點要在 Isaac Sim 視窗):
@@ -75,8 +72,7 @@ lerobot_agent_dual \
 lerobot_agent_dual --task Lerobot-So101-Dual-Vials-To-Rack-DR \
   --repo_id ChihHanShen/bimanual-so101-pickvials \
   --repo_root $(pwd)/datasets/bimanual-so101-pickvials \
-  --task_name "Pick up the vials and place them into the rack" \
-  --viz kit
+  --task_name "Pick up the vials and place them into the rack"
 ```
 
 鍵盤操作、schema 檢查、上傳都跟第 4~6 步相同。
@@ -178,7 +174,7 @@ uv run hf download ChihHanShen/gr00t-n1.7-so101-bimanual-pickvials \
 
 # 2) 起 server,--model-path 指到那個 checkpoint 目錄
 uv run python gr00t/eval/run_gr00t_server.py \
-    --model-path ~/models/bimanual-pickvials/pickvials-n1p7-run2/checkpoint-50000 \
+    --model-path ~/models/bimanual-pickvials-cotrain/pickvials-n1p7-run3/checkpoint-25000 \
     --embodiment-tag new_embodiment \
     --modality-config-path examples/SO101_bimanual/so101_bimanual_config.py \
     --device cuda:0
@@ -200,13 +196,11 @@ uv run python gr00t/eval/run_gr00t_server.py \
 lerobot_eval_dual \
   --task Lerobot-So101-Dual-Vials-To-Rack-Eval \
   --num_episodes 10 \
-  --policy_host localhost --policy_port 5555 \
-  --viz kit
+  --policy_host localhost --policy_port 5555
 
 # DR 場景評估(外觀隨機,較嚴格)
-lerobot_eval_dual --task Lerobot-So101-Dual-Vials-To-Rack-DR-Eval --num_episodes 10 --viz kit
+lerobot_eval_dual --task Lerobot-So101-Dual-Vials-To-Rack-DR-Eval --num_episodes 10 --rerun
 
-# 不需要看畫面(純跑分)可以省略 --viz,渲染較快
 # 加 --rerun 開 Rerun 視覺化(看 policy 收到的畫面 + 動作)
 ```
 

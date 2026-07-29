@@ -1,15 +1,12 @@
 # 雙臂 SO-101 Sim-to-Real Roadmap
 
-**目標**:把單臂模擬環境改成雙臂,換上自製支架 + RealSense D435i,用 3 相機收 RGB+depth,
-雙臂遙操作收資料 → 訓練 GR00T → Domain Randomization + 真實資料 co-training → sim-to-real。
+**目標**:把單臂模擬環境改成雙臂,換上自製支架 + RealSense D435i ×3,雙臂遙操作收資料 →
+訓練 GR00T → Domain Randomization + 真實資料 co-training → sim-to-real。
 
-**現在位置**:Phase 8 —— sim eval(50%)、真機資料收集(50 集)、real+sim co-training checkpoint
-都已完成,**唯一還沒打通的是真機雙臂 real eval**。計畫改用自己的 lerobot fork
-(`maxshen1212/lerobot@graphen`)的原生 `bi_so_follower` + `groot` policy 直接跑 `lerobot-rollout`,
-不用再手刻 script、也不用 Isaac-GR00T server——checkpoint 相容性已實測確認可行。Cosmos 資料增強、
-SAGE+GapONet 致動落差補償列為 Phase 9,尚未探索。
+**現在位置**:Phase 8。sim eval(成功率 50%,作為基準線)、真機 50 集資料、real + sim
+co-training checkpoint 都已完成,**唯一還沒打通的是真機雙臂 real eval**。
 
-最後更新:2026-07-24
+最後更新:2026-07-27
 
 ---
 
@@ -17,17 +14,16 @@ SAGE+GapONet 致動落差補償列為 Phase 9,尚未探索。
 
 | 項目 | 決定 |
 | --- | --- |
-| **任務** | **協作式雙臂 vials-to-rack**:試管散在墊子上,**任一隻手臂都可拿任一支**試管,目標是把**所有試管放進中央共用試管架**。(不是 handoff、不綁定左右分邊) |
-| **試管數量** | 場景固定 4 支;reset 時 `hide_random_vials` 隨機藏掉幾支 → 等效**每集 1~4 支**(見 Phase 4B,已完成)。擺放維持穩定 2 左 / 2 右(全散佈版已還原,以求 reset 穩定) |
+| **任務** | **協作式雙臂 vials-to-rack**:試管散在墊子上,**任一隻手臂都可拿任一支**試管,目標是把**所有試管放進中央共用試管架**(不綁定左右分邊) |
+| **試管數量** | 場景固定 4 支;reset 時 `hide_random_vials` 隨機藏掉幾支 → 等效**每集 1~4 支**。擺放維持穩定 2 左 / 2 右 |
 | **試管架** | **1 個中央共用架**(body 中心置中於墊子中心 world (0.22, 0)),兩臂都搆得到 |
 | **佈局** | 兩臂並排、皆面向 +x;左臂 base (-0.05, +0.15, 0)、右臂 (-0.05, -0.15, 0) |
 | **間距** | 0.30 m(左臂 y=+0.15、右臂 y=−0.15)✅ 真機已驗證 |
-| **相機** | 3 台:左腕、右腕、ego(燈箱開口置中俯視),收 RGB + depth |
-| **ego 相機(已量測確認 2026-07-01)** | world 位置 ≈ **(-0.23, 0.03, 0.53)**(離地高 ~0.53m),朝墊子中心 (0.22,0) 俯視約 45°;intrinsics focal 15.245mm、aperture 20.955×15.716 → **HFOV≈69°**(= D435 color)。ego_cam 相對 LightBox 的 local:translate (0, 0.4, 0.5)、euler (45°,0,-90°)。畫面已在 `camera_center` 目視確認**置中正確** |
-| **depth** | 只存檔備用,**不進 policy** |
+| **相機** | 3 台:左腕、右腕、ego(燈箱開口置中俯視),**只收 RGB** |
+| **ego 相機(已量測確認)** | world 位置 ≈ **(-0.23, 0.03, 0.53)**(離地高 ~0.53m),朝墊子中心 (0.22,0) 俯視約 45°;intrinsics focal 15.245mm、aperture 20.955×15.716 → **HFOV≈69°**(= D435 color)。ego_cam 相對 LightBox 的 local:translate (0, 0.4, 0.5)、euler (45°,0,-90°) |
 | **工作墊** | mat.usda,world x[0.068, 0.372](前後 0.3048m)× y[-0.229, 0.229](左右 0.4572m),中心 (0.22, 0) |
-| **語言指令** | **沿用單臂那句**(embodiment-agnostic):`"pick up the vials and place them into the rack"`。不寫「左手做什麼右手做什麼」,雙臂差異靠 embodiment tag + 12 維 state 表達 |
-| **dataset schema** | 12 維 state/action(命名 `left_*` 6 個 + `right_*` 6 個)+ 3 相機(wrist_left/wrist_right/center,480×640)+ fps=30 |
+| **語言指令** | embodiment-agnostic 的一句:`"Pick up the vials and place them into the rack"`。不寫「左手做什麼右手做什麼」,雙臂差異靠 embodiment tag + 12 維 state 表達 |
+| **dataset schema** | 12 維 state/action(`left_*` 6 個 + `right_*` 6 個)+ 3 相機(`wrist_left`/`wrist_right`/`center`,480×640)+ fps=30 |
 
 ---
 
@@ -42,304 +38,288 @@ SAGE+GapONet 致動落差補償列為 Phase 9,尚未探索。
 
 ---
 
-## 階段總覽
+## 進度總覽
 
 ```
-Phase 1  單臂 USD(D435i 支架+相機+physics)         ✅ 完成
-Phase 2  雙臂 Isaac Lab 環境                         ✅ 完成
-Phase 3  三相機 + RGB/Depth                          ✅ 完成
-Phase 4A 雙臂遙操作 + 收資料(固定 4 支)             ✅ 完成(74 集乾淨、已上 HF Hub)
-Phase 4B 數量隨機(1~4 支,hide_random_vials)        ✅ 完成
-Phase 5  Domain Randomization                        ✅ 完成(桌面紋理暫由 HDRI 補)
-Phase 6  GR00T 訓練(純 sim)+ sim eval              ← 現在:模型已訓練,eval 基礎設施待建
-Phase 7  真機對齊 + 收真實資料
-Phase 8  Co-training + 部署
+Phase 1   單臂 USD(D435i 支架 + 相機 + physics)      ✅
+Phase 2   雙臂 Isaac Lab 環境                          ✅
+Phase 3   三相機                                       ✅
+Phase 4A  雙臂遙操作 + 收資料                          ✅  74 集,已上 HF Hub
+Phase 4B  數量隨機(1~4 支)                            ✅
+Phase 5   Domain Randomization                         ✅  桌面紋理暫由 HDRI 補
+Phase 6   GR00T 訓練(純 sim)+ sim eval               ✅  成功率 50%(基準線)
+Phase 7   真機對齊 + 收真實資料                        ✅  50 集
+Phase 8   Co-training + 真機 eval                      ← 現在
+Phase 9   進階 sim-to-real(Cosmos / SAGE+GapONet)     尚未探索
 ```
 
 ---
 
-## Phase 1 — 單臂 USD ✅ 完成
+## Phase 1–7 已完成 — 現況速查
 
-換上自製支架 + RealSense D435i,**含 physics(質量 + 碰撞)**,因為是 sim-to-real,
-實體相機重量會影響任務動力學。相機/支架用 Approach A(質量加在 collision shape、不另建 rigid body,
-避免自由落體),掛在 gripper body 上。
+### 場景與環境
 
-- ✅ 自製自封裝 D435i(`RSD435i.usd`,Camera prim [translate,orient,scale] 皆 double3)
-- ✅ 支架 `Wrist_cam_mount_D435_clean.usd`
-- ✅ 手臂 USD `SO-ARM101-USD-d435i-physics.usd`(assets/so101.py 的 `SO101_CFG.spawn.usd_path`)
-- ✅ 燈箱 `lightbox-egocam.usd`:拔掉牆上舊 D455,改中央 ego D435i(`ego_cam`)俯視
+- **資產**:`SO-ARM101-USD-d435i-physics.usd`(手臂,相機/支架含 physics——實體相機重量會影響
+  任務動力學)、`RSD435i.usd`、`Wrist_cam_mount_D435_clean.usd`、`lightbox-egocam.usd`
+  (中央 ego D435i 俯視)
+- **三層 config 繼承**:`so101_dual_env_cfg.py`(雙臂 articulation + 12 維 action,左 0:6 / 右 6:12)
+  → `so101_dual_task_env_cfg.py`(三相機 + DR event/observation 群組)
+  → `so101_dual_vials_env_cfg.py`(試管、共用架、contact sensor、DR / eval 變體)
+- **註冊 env**:`Lerobot-So101-Dual-Base`、`-Vials-To-Rack`、`-Vials-To-Rack-DR`、`-Eval`、`-DR-Eval`
+- 三相機 `camera_wrist_left/right` + `camera_center` 皆 `spawn=None`,指向 USD 內已烤好的 Camera prim。
+  相機是**自動發現**的:script 掃 `camera_` 開頭物件,命名對了 recorder 就自動收
+- 單臂鏈完全沒動、照樣可用;目前所有實驗聚焦雙臂,單臂流程僅供參考架構
 
----
+### 任務邏輯(mdp/)
 
-## Phase 2 — 雙臂 Isaac Lab 環境 ✅ 完成
+- `hide_random_vials`(resets.py):reset 時隨機把幾支藏到相機看不到的地方 → 等效每集 1~4 支
+- per-sensor 狀態重構(terms.py):`any_vial_grasped` / `vial_placed_on_rack` 用
+  `func._state[sensor_name]`,左右臂不互相干擾;subtask 觀測四個都吃全部 4 支(順序對齊 filter)
+- `all_active_vials_placed_termination`:dual-safe 成功判定——跨左右兩個 contact sensor,
+  成功 = 所有「啟用中(沒被藏掉)」試管同時在架上、連續 25 步。天然支援隨機 1~4 支
 
-- ✅ 資產:`SO101_DUAL_LEFT/RIGHT_CFG`(+ `_CONTACT_CFG` 變體),base 左 (-0.05, +0.15, 0)/右 (-0.05, -0.15, 0)
-- ✅ `so101_dual_env_cfg.py`:`robot_left/right`、`ee_frame_left/right`、12 維 action(左 0:6、右 6:12)、左右關節觀測
-- ✅ 註冊 `Lerobot-So101-Dual-Base`
-- ✅ 每一層是**獨立新檔**,單臂鏈完全沒動、照樣可用
+### Domain Randomization(Phase 5)
 
----
+- 光照:燈箱曝光 + `randomize_sky_light`(換 HDRI + 曝光 + 色溫,25 張 .exr)
+- 外觀:左右臂各自獨立隨機顏色、試管架 8 色、試管透明度
+- 相機抖動分工:**兩腕相機抖焦距** + **中央 ego 抖位姿**。ego「不」抖焦距
+  (HFOV≈69° 已量測對齊真機,抖焦距會破壞 sim-real 對齊)
+- 桌面旋轉加大(base ±0.1 → DR ±0.3)
+- 〰️ 桌面**紋理**未做(需 texture-swap 函式 + 多紋理 mat 資產),外觀多樣性暫由 HDRI 天空光補
 
-## Phase 3 — 三相機 + RGB/Depth ✅ 完成
+### 資料與模型
 
-- ✅ `so101_dual_task_env_cfg.py`:`camera_wrist_left/right`(掛各臂 gripper 內 d435i)+ `camera_center`(燈箱 ego_cam),皆 `spawn=None` 指向 USD 內已烤好的 Camera prim
-- ✅ 三相機 ×(rgb+depth)觀測群組
-- ✅ 相機是**自動發現**的:script 掃 `camera_` 開頭物件,命名對了 recorder 就自動收
-- ✅ 註冊 `Lerobot-So101-Dual-Task`
+- **sim**:74 集乾淨資料 → `ChihHanShen/bimanual-so101-pickvials`(HF Hub)
+- **真機**:50 集 demo;雙臂 + 雙 leader + 3 台 D435i 已安裝校正,收資料 pipeline 跑通
+- **checkpoint**:純 sim 版、real + sim co-training 版都已訓好
+- 遙操作用兩支 leader(env 變數 `TELEOP_PORT_LEFT/RIGHT` + `TELEOP_ID_LEFT/RIGHT`,每次插拔要重設);
+  鍵盤 S 起停錄製、C 取消當段、R reset
+- 錄製 / 清理工作流見 [run_cheatsheet.md](run_cheatsheet.md);刪壞集用
+  `tools/delete_episodes.py <檔號>`(用檔號、非 episode_index)
 
----
+### sim eval 基準線(Phase 6)
 
-## Phase 4A — 雙臂遙操作 + 收資料(固定 4 支)✅ 完成
+兩段式:起 `run_gr00t_server.py` 吃 checkpoint(ZMQ port 5555)→ 跑 `lerobot_eval_dual` 當 client
+做 rollout 算成功率。指令見 [run_cheatsheet.md](run_cheatsheet.md) 的「Eval」段。
 
-**任務環境**(`so101_dual_vials_env_cfg.py`,註冊 `Lerobot-So101-Dual-Vials-To-Rack`):
-- ✅ 4 支試管 + 中央共用架 `rack_center`
-- ✅ 兩個夾爪接觸感測器 `contact_grasp_left/right`,各自 filter 全部 4 支(`VIAL_PRIMS_ALL`)
-- ✅ per-sensor 狀態重構(mdp/terms.py):`any_vial_grasped`/`vial_placed_on_rack` 用 `func._state[sensor_name]`,左右臂不互相干擾
-- ✅ subtask 觀測 `vial_grasped_left/right`、`vial_placed_left/right` 都吃全部 4 支(`VIALS_ALL`,順序對齊 filter)
-
-**遙操作 + 錄製**(`scripts/lerobot_agent_dual.py`,console `lerobot_agent_dual`):
-- ✅ 兩支 leader(env 變數 `TELEOP_PORT_LEFT/RIGHT` + `TELEOP_ID_LEFT/RIGHT`,每次插拔要重設)
-- ✅ 12 維動作;鍵盤 S 起停錄製、C 取消當段、R reset(R 會先 stop_recording)
-- ✅ `lerobot_recorder.py` 參數化 `joint_names`(雙臂傳 12 個 `left_*/right_*`)
-
-**收資料成果**:
-- ✅ 已錄 **74 集乾淨資料**(一集一檔)、schema 驗證正確(12 維 + 3 相機 480×640 + fps=30)、**已上 HF Hub**(`ChihHanShen/bimanual-so101-pickvials`)
-- 錄製/清理工作流見 [run_cheatsheet.md](run_cheatsheet.md);刪壞集用 `tools/delete_episodes.py <檔號>`(用檔號、非 episode_index)
-
----
-
-## Phase 4B — 數量隨機(1~4 支)✅ 完成
-
-目的:讓 policy 對「推論時試管數量 ≠ 訓練時」魯棒(例:訓練常見 4 支,deploy 只有 3 支也要能做完就停)。
-GR00T 沒有計數器、只對當下畫面反應,所以要在收資料時就讓數量變。
-
-- ✅ `hide_random_vials`(mdp/resets.py):reset 時隨機把幾支藏到相機看不到的地方,等效 1~4 支;藏的位置確定不入任何相機(含 ego 俯視)
-- ✅ **eval 安全**:成功判定只算「啟用中(沒被藏)」的試管
-- ✅ 不動 dataset schema → 可接續同一 dataset append,混著收(部分 4 支、部分隨機)對訓練更好
+- `GR00TDualRemotePolicy`(lerobot_interface.py):左右各一 `LeRobotSO101Interface`,state/action
+  分成 `left_arm`(0:5)/`left_gripper`(5:6)/`right_arm`(6:11)/`right_gripper`(11:12)
+- **實跑結果(純 sim checkpoint)**:乾淨場景 `-Eval` 成功率 **50%**、DR 場景 `-DR-Eval`
+  成功率**同樣 50%** → policy 沒有被 Phase 5 的外觀 DR 拖垮。**這是真機 eval 的對照基準線**
+- ⚠️ server 的 `--modality-config-path` / `--embodiment-tag new_embodiment` 必須對上訓練設定,
+  否則維度或語意對不上
 
 ---
 
-## Phase 5 — Domain Randomization ✅ 完成
+## Phase 8 — Co-training + 真機 eval ← 現在
 
-複用單臂 `vials_to_rack_env_cfg.py` 的 DR event,實作於 `so101_dual_vials_env_cfg.py`
-的 `SO101DualVialsDRSceneCfg` / `SO101DualVialsEventDRCfg` / `SO101DualVialsDREnvCfg`,
-註冊 `Lerobot-So101-Dual-Vials-To-Rack-DR`。
-
-- ✅ 光照:燈箱曝光(base)+ `randomize_sky_light`(換 HDRI + 曝光 + 色溫,25 張 .exr)
-- ✅ 機器人顏色:`randomize_robot_color` 擴成多機器人,左右臂各自獨立隨機
-- ✅ 試管架顏色(8 色)+ 試管透明度隨機化
-- ✅ 相機抖動(刻意沿用單臂分工):**兩腕相機抖焦距** + **中央 ego 相機抖位姿**。
-      中央 ego「不」抖焦距(HFOV≈69° 已量測對齊真機,抖焦距會破壞 sim-real 對齊);
-      腕相機「不」抖位姿(mount xform 可動性待 Isaac 內確認,可動再補)
-- ✅ 桌面**旋轉**加大(base ±0.1 → DR ±0.3)
-- 〰️ 桌面**紋理**:暫未做(需另建 texture-swap 函式 + 多紋理 mat 資產),外觀多樣性暫由 HDRI 天空光補
-
-✅ **完成標準**:每次 reset 外觀明顯不同(左右臂顏色/天空光/架子色/試管透明/腕相機 FOV/中央相機小幅位移),
-   但任務幾何不變(中央相機 FOV、所有試管/架子幾何維持不變)。
-
----
-
-## Phase 6 — GR00T 訓練(純 sim)+ sim eval ✅ 完成
-
-**訓練** — ✅ 純 sim 雙臂 GR00T 模型已 finetune 完成(checkpoint 就緒)。
-
-**sim eval 基礎設施** — ✅ **已實作並跑過一輪**(2026-07-13 建好、2026-07-24 真跑,成功率 50%,
-對齊 `examples/SO101_bimanual/modality.json`)。client-server 兩段式:起 GR00T server 吃 checkpoint(port 5555)
-→ 跑 `lerobot_eval_dual` 當 client 做 rollout 算成功率。指令見 [run_cheatsheet.md](run_cheatsheet.md) 的「Eval」段。
-
-- [x] **dual eval task**:`SO101DualVialsEvalEnvCfg` / `SO101DualVialsEvalDREnvCfg`(terminations + 7.5 分鐘上限);
-      註冊 `Lerobot-So101-Dual-Vials-To-Rack-Eval` / `-DR-Eval`
-- [x] **dual-safe 成功判定**:`all_active_vials_placed_termination`(mdp/terms.py)——跨左右兩個 contact sensor、
-      成功 = 所有「啟用中(沒被 `hide_random_vials` 藏掉)」試管都同時在架上、連續 25 步;天然支援隨機 1~4 支
-- [x] **dual client**:`GR00TDualRemotePolicy`(lerobot_interface.py)——左右各一 `LeRobotSO101Interface`、
-      state/action 分成 `left_arm`(0:5)/`left_gripper`(5:6)/`right_arm`(6:11)/`right_gripper`(11:12)、12 維
-- [x] **dual eval script**:`scripts/lerobot_eval_dual.py`(console `lerobot_eval_dual`)——12 維 action、雙 interface、
-      讀 `joint_pos_left`+`joint_pos_right` 與 `rgb_wrist_left/right/center`
-- [x] ~~embodiment tag~~:**不用做**——訓練用 `NEW_EMBODIMENT`,client/server 皆已存在
-- [x] 相機 key `center/wrist_left/wrist_right` 已對上 modality.json → **不用 rename**
-- [x] **已真跑一輪**(2026-07-24):純 sim 資料微調的 GR00T checkpoint
-      - 乾淨場景 `Lerobot-So101-Dual-Vials-To-Rack-Eval`:成功率 **50%**
-      - DR 場景 `Lerobot-So101-Dual-Vials-To-Rack-DR-Eval`(外觀隨機,較嚴格):成功率**同樣 50%**
-      兩者成功率一致,代表 policy 對 Phase 5 的外觀 DR(機器人顏色/天空光/架子色/試管透明/相機抖動)
-      已有一定魯棒性、沒有明顯被外觀變化拖垮;作為後續真機評估的基準線。
-
-⚠️ **關鍵依賴**:server 的 `--modality-config-path` / `--embodiment-tag` 必須對上訓練設定,否則維度或語意對不上。
-
-✅ **完成標準**:純 sim policy 在 sim eval 跑得動、有合理成功率(dual-safe 成功判定正確計數多支試管)。**達成**(50%)。
-
----
-
-## Phase 7 — 真機對齊 + 收真實資料 ✅ 完成
-
-對齊 geometry,外觀差異交給 DR。
-
-- [x] 真實雙臂 + 雙 leader,校正、實體安裝支架 + RealSense D435i(三台)
-- [x] 真機遙操作收真實 demo,**已收 50 episodes**
-- [x] 收資料 pipeline 跑通(硬體 + 相機 + teleop + 錄製全套已在用,非僅單次測試)
-
-✅ **完成標準**:真機相機視角/FOV/解析度對得上 sim,dataset 同 schema。**達成**——已拿這批真實資料
-訓練出一個 real + sim co-training 模型(見 Phase 8)。
-
----
-
-## Phase 8 — Co-training + 部署 ← 現在
-
-- [x] sim(DR)+ real 混合 co-training finetune——已拿 50 集真實資料 + sim 資料訓出一個 co-training checkpoint
-- [ ] **部署:雙臂版 real eval**(見下方技術規劃)——**目前唯一還沒打通的環節**
+- [x] sim(DR)+ real 混合 co-training finetune
+- [ ] **雙臂真機 eval**(見下)——**目前唯一還沒打通的環節**
 - [ ] 量真機成功率,迭代調 DR / 補資料 / 修相機對齊
 
 ✅ **完成標準**:真機雙臂任務成功率達標,sim-to-real gap 收斂。
 
-### 真機雙臂 eval 技術規劃 v2(改用自己的 lerobot fork,取代原本手刻 script 的計畫)
+### 做法:Isaac-GR00T 官方 server/client
 
-⚠️ 這一版**取代**了先前「參考官方單臂 `so101_eval.py`/`so101_control.py` 手刻
-`SO101DualControl`/`So101DualAdapter`」的計畫。原因:改用自己的 lerobot fork
-(`github.com/maxshen1212/lerobot`,分支 `graphen`,已更新到新版)後,雙臂硬體控制 + GR00T 推論
-**都已經是原生功能**,不用再手刻。
+以 `Isaac-GR00T/gr00t/eval/real_robot/SO100/eval_so100.py` 為模板改寫雙臂 client
+`eval_so101_dual.py`,server 沿用 sim eval 那顆 `run_gr00t_server.py`,robot 端用 lerobot fork
+(`maxshen1212/lerobot@graphen`)原生的 `bi_so_follower`。
 
-**已實測驗證(2026-07-24,在 scratch venv 裡跑的,非本專案環境)**:
+那支官方 script 本來就是給人改寫的**參考實作**——docstring 自己寫「SO100 **/ SO101**」,
+`examples/SO100/README.md` 的 Closed-Loop 段也註明它是「how to write deployment code using
+Policy API」。官方 [12-real-evaluation] 用的 `so101_eval.py`(workshop docker 版,多一個
+`--rerun`)就是同一支的變體。
 
-1. **`bi_so_follower`**(`src/lerobot/robots/bi_so_follower/`):原生雙臂 robot class,包兩個
-   `SOFollower`,`get_observation`/`send_action` 自動處理 `left_*`/`right_*` 前綴,共用相機
-   (top-level `cameras`,不加前綴)+ 各臂自己的相機(自動加前綴)。跟本專案資料集的
-   `left_*`/`right_*` 命名慣例天然對上,**不用再寫 `SO101DualControl`**。
-2. **`groot` policy type**(`src/lerobot/policies/groot/`):LeRobot 原生重寫的 GR00T N1.7
-   (Qwen3-VL/Cosmos-Reason2-2B backbone,跟本專案模型同版本),透過 `lerobot-rollout
-   --policy.type=groot` 直接**在本機 process 內跑推論**——**完全不需要 Isaac-GR00T 的
-   ZMQ server**(搜過這個 fork 全部程式碼,沒有任何 `PolicyClient`/zmq/port-5555 這類跟
-   Isaac-GR00T server 對接的東西——是取代掉它,不是整合它)。
-3. **checkpoint 相容性(關鍵問題,已實測)**:把本機既有的 sim-only checkpoint
-   (`~/models/bimanual-pickvials/pickvials-n1p7-run2/checkpoint-50000`,Isaac-GR00T 原生訓練出來的)
-   丟給這個 fork 的 `GrootPolicy.from_pretrained(ckpt_path)`——**成功,1031 個權重 tensor 全部
-   乾淨載入,沒有任何 missing/unexpected keys 的警告**。（`GrootConfig.from_pretrained()` 單獨呼叫會噴
-   `Missing 'type' field`,但 `GrootPolicy.from_pretrained` 有另外處理 Isaac-GR00T 原生的
-   HF-style config,不受影響。）
-   - `checkpoint/experiment_cfg/dataset_statistics.json` 裡的 `new_embodiment` 對應到
-     `state`/`action` 都是 `left_arm(5)+left_gripper(1)+right_arm(5)+right_gripper(1)` = 12 維,
-     跟本專案的 modality 分組完全一致。
-   - **結論:不需要透過 `lerobot-train` 重訓**,Isaac-GR00T 原生訓出的 checkpoint(包含現有的
-     real+sim co-training checkpoint,理論上同一套訓練 pipeline 產出、應該一樣能載入,但**還沒
-     實測過那顆**——只測了本機找得到的 sim-only checkpoint-50000)可以直接被這個 fork 的
-     `GrootPolicy` 吃。
+選它的理由:**推論路徑與訓練同源**——normalization、relative-action 編碼、影像 crop/resize 全部
+由 checkpoint 自己的 `processor_config.json` 決定,不需要人工對齊。現階段要量的是 sim-to-real
+gap,推論路徑上不能再多一個未驗證的變因;而且 sim / real 共用同一個 server,兩邊成功率才可比。
 
-**新的部署方式(取代原本的 docker two-terminal 架構)**:一行指令,不用起 GR00T server:
+### ⚠️ `use_relative_action` = **true**
+
+checkpoint 裡有兩份值不同的 config,**推論時生效的是 `processor_config.json`(= `true`)**,
+不是 `experiment_cfg/final_model_config.json`(= `false`)——`Gr00tPolicy` 走
+`AutoProcessor.from_pretrained(processor_dir)`(`Isaac-GR00T/gr00t/policy/gr00t_policy.py:124`)。
+
+搭配 `examples/SO101_bimanual/so101_bimanual_config.py` 的 per-key 設定,模型實際輸出是:
+`left_arm`/`right_arm` = **相對當前 state 的 delta**,兩個 gripper = 絕對值。
+
+走 Isaac-GR00T 路線這是自動從 checkpoint 讀的,**不用設也設不錯**;但任何把這些 delta 當成
+絕對關節角送進真機的做法(例如在別的 runtime 上手動把這個 flag 設成 false)**都會讓手臂暴衝**。
+
+### ⚠️ 控制頻率是 10 Hz,不是 30 Hz
+
+**官方的一致做法是「control rate = 訓練資料集的採集 fps」**,不是相機 fps、也不做內插:
+DROID client 寫死 `DROID_CONTROL_FREQUENCY = 15`(15 fps 資料),註解就是 "Sleep to match DROID
+data collection frequency";SO100 client sleep 到 1/30 因為那個資料集是 30fps 錄的。
+
+本專案的 co-train checkpoint 吃的是 `bimanual-so101-pickvials-{real,sim}-10fps`
+(`Isaac-GR00T/CHEATSHEET.md:12-13`),**已實查 `meta/info.json` → `fps: 10`**
+(22,157 frames / 49 episodes = 452 frames/集)。`CHEATSHEET.md:241` 也明寫換 10fps 就是為了把
+開環 chunk 數從 ~140 降到 21/28。
+
+→ **一個 action = 0.1 秒,16 步的 chunk 覆蓋 1.6 秒。** 錄製 config 裡的 30 fps 是**擷取**頻率,
+資料進訓練前已降採樣。用 30 Hz 跑會讓手臂快 3 倍。
+
+順帶一提:官方文件擔心的 stop-and-go(latency 要 < 33ms 才跟得上 30 Hz)**在我們這裡不存在**——
+3B 模型 0.2-0.3 秒的 round-trip 遠小於 1.6 秒的重規劃窗口。
+
+### 實作:`eval_so101_dual.py` ✅ 已完成
+
+位置:`Isaac-GR00T/gr00t/eval/real_robot/SO101_bimanual/`(**不動上游的 `SO100/`**——它 pin 的
+lerobot commit 早於 `so_follower`/`bi_so_follower` 重構,無法沿用)。指令見 CHEATSHEET 4c。
+
+**刻意貼著官方 `eval_so100.py` 的結構寫**(235 行,官方 291 行):同樣是 connect → `while True`,
+只差兩件事——12 維 + 3 相機的 adapter、10 Hz 控制頻率。其餘一律不加。
+
+- **12 維 state 分組**:`left_arm`(0:5) / `left_gripper`(5:6) / `right_arm`(6:11) /
+  `right_gripper`(11:12);`bi_so_follower.get_observation()` 吐的 `left_*.pos`/`right_*.pos`
+  天然對上,`decode_action_chunk` 反向 concat 回 12 個 `.pos`。
+- **`np.float32` 是關鍵**:lerobot 回 Python float,裸 `np.array([...])` 會給 float64,
+  server 直接拒絕(`gr00t_policy.py:320`)。
+- **三台相機全放 top-level**,任何一台掉進 `right_arm_config.cameras` 會變成 `right_wrist_right`。
+- **跑法就是官方的 `while True`**:一次執行 = 一集,成功或卡住就 Ctrl-C、人工 reset、再跑一次,
+  成功率自己記。因此**不需要** episode 迴圈、outcome 提問、鍵盤監聽、每集回起始姿態。
+- 加的只有 `max_relative_target` 軟限位(純 config 傳遞)。
+- 一度寫成 1100 行(smoke/dryrun/capture-home 模式、mp4/jsonl 記錄、契約與觀測驗證、
+  連線重試、延遲統計、episode 迴圈與回位),已砍回 **235 行**——比官方的 291 行還短。
+
+### 真機成功率協定
+
+- **頭條數字用二元判定**:90 秒內 4 支全部坐進架子才算成功(對齊 sim 的 all-or-nothing),
+  每集**額外記 `vials_placed` (0-4)** 當低雜訊的第二指標。
+- `f` = 判斷已無法挽回時提前中止(相對 sim truncation 的刻意偏離,要寫進報告);
+  `r` = 只用於操作者/硬體失誤,不進分母。
+- **N=20**。N=10 時 50% 的 95% CI 約 ±31 個百分點,分不出 30% 和 70%。
+
+### ⚠️ 跟 sim 的 50% 對照時,三個不對等必須註明
+
+1. **時間基準**:sim `decimation=2` / `sim.dt=1/120` → 60 Hz,16 步 chunk 在 0.27 秒內跑完,
+   比資料代表的 1.6 秒快 6 倍。那是 physics-time vs data-time 的產物,不會也不該轉移。
+2. **成功偵測**:sim 是 `confirm_steps=25` 的自動判定,真機是人判。
+3. **時間預算**:sim `EVAL_EPISODE_LENGTH_S = 22.5s` sim 時間,真機是 90 秒(900 步 @ 10 Hz)。
+
+50% 當參考點,不是嚴格 baseline。
+
+### 兩個環境(不可混用)
+
+| 角色 | 環境 | 理由 |
+| --- | --- | --- |
+| **Server** | Isaac-GR00T 自己的 `.venv`(`uv sync`) | pin `torch==2.9.0` / `transformers==4.57.3` |
+| **Client** | **沿用 lerobot 的 `.venv`** + `msgpack`/`msgpack-numpy` + `uv pip install --no-deps -e <Isaac-GR00T>` | 這個 venv 本來就在驅動這套硬體(資料就是它錄的) |
+
+⚠️ **server 不能借用 lerobot venv 跑**:lerobot 是 `transformers 5.5.4` / `torch 2.11.0`,
+跟 Isaac-GR00T 差一個主版本。借用等於讓影像前處理/tokenizer 跟訓練時不同,
+「推論路徑與訓練同源」這個選型理由就沒了。
+
+> 本機首次 `uv sync` 會卡在 `scripts/deployment/dgpu/wheels/torchcodec-...aarch64.whl` ——
+> 那是沒 smudge 的 Git LFS pointer(雖然本機是 x86_64,uv 仍會讀它的 metadata)。
+> 解法:`git lfs install --local && git lfs pull --include="scripts/deployment/dgpu/wheels/*.whl"`。
+
+### 部署方式(two-terminal,與 sim eval 同構)
 
 ```bash
-lerobot-rollout \
-  --strategy.type=base \
-  --policy.type=groot \
-  --policy.path=<checkpoint 目錄> \
-  --policy.embodiment_tag=new_embodiment \
-  --robot.type=bi_so_follower \
-  --robot.left_arm_config.port=<左臂 port> --robot.left_arm_config.id=<左臂 id> \
-  --robot.right_arm_config.port=<右臂 port> --robot.right_arm_config.id=<右臂 id> \
-  --robot.cameras="{ center: {...} }" \
-  --robot.left_arm_config.cameras="{ wrist: {...} }" \
-  --robot.right_arm_config.cameras="{ wrist: {...} }" \
-  --task="pick up the vials and place them into the rack" \
-  --duration=60 --device=cuda --display_data=true
+# 終端機 A(~/Isaac-GR00T)——與 sim eval 完全相同的 server
+uv run python gr00t/eval/run_gr00t_server.py \
+    --model-path ~/models/bimanual-pickvials-cotrain/pickvials-n1p7-run3/checkpoint-25000 \
+    --embodiment-tag NEW_EMBODIMENT --port 5555
+# 註:有 --model-path 時 --modality-config-path 會被靜默忽略(那段在 dataset_path 分支裡),
+#     modality config 來自 checkpoint 自己的 processor。帶了無害,但不是必要。
+
+# 終端機 B(Isaac-GR00T/gr00t/eval/real_robot/SO101_bimanual/)——一次執行 = 一集
+/home/graphen/sim2real/lerobot/.venv/bin/python eval_so101_dual.py
 ```
 
-**待決定 / 待驗證**:
-- [ ] 拿**真正要用的 real+sim co-training checkpoint**(不是這次測的 sim-only checkpoint-50000)
-      重跑一次同樣的 `GrootPolicy.from_pretrained` 載入測試,確認一致
-- [ ] `bi_so_follower` 的相機命名是 `left_<cam>`/`right_<cam>`(前綴在前),本專案訓練時用的是
-      `wrist_left`/`wrist_right`(前綴在後)——要嘛確認 processor 能透過 rename map 接起來,要嘛
-      訓練 camera key 命名本來就是用左右前綴(待查 `examples/SO101_bimanual/modality.json` 對應
-      到 lerobot dataset 的實際欄位名);`center` 這種共用相機直接放 `--robot.cameras`、不用前綴
-- [ ] 確認 `--policy.embodiment_tag=new_embodiment` 以外還需不需要帶其他 flag(`chunk_size` /
-      `n_action_steps` / `use_relative_actions` ——checkpoint 的 `final_model_config.json` 裡
-      `use_relative_action: false`,要跟 rollout 端設定對上)
-- [ ] 這個 fork 需要 Python ≥3.12 + `transformers==5.5.4`(裝 `.[groot]` extra 才有 Qwen3-VL),
-      跟現有 `~/env_isaaclab`(sim 那邊的環境)不是同一包,真機部署要另外建一個 env / venv
-- [ ] 雙臂初始/歸位姿態、兩臂是否需要同步送 action——`bi_so_follower` 內部細節待確認是否已處理好
-      (`send_action` 是循序呼叫 `left_arm.send_action` 再 `right_arm.send_action`,不是真正並行)
+硬體參數(port / 校正目錄 / 三台相機序號 / task 字串)都已是 script 的預設值,平常不用帶。
+換 checkpoint 只需重啟 server,client 完全不動。
 
-**保底方案**:如果上面哪一步卡住(例如相機命名接不上、embodiment_tag 對不上),還是可以退回「參考
-官方單臂 `so101_eval.py`/`so101_control.py`,手刻 `SO101DualControl`/`So101DualAdapter` + Isaac-GR00T
-server」的老路(詳細元件對照表見這次改版前的 git 歷史),只是複雜很多——目前優先推 lerobot 原生路線。
+### 待辦 / 驗證順序
+
+- [x] 確認 co-training checkpoint 的 `processor_config.json` → **`use_relative_action: true`**,
+      action delta 16、四組 key 與三台相機 key 全部吻合、reps = RELATIVE/ABSOLUTE/RELATIVE/ABSOLUTE
+- [x] 確認訓練 fps → **`meta/info.json` fps = 10**(22,157 frames / 49 集 = 452 frames/集)
+- [x] 寫 `eval_so101_dual.py`;client 環境就緒(lerobot venv + msgpack + gr00t no-deps)
+- [x] **server 通聯驗證通過**(2026-07-28):契約由 server 實際回報並吻合
+      (`action_horizon=16`、`video_delta=(0,)`、`state_delta=(0,)`)、chunk shape/dtype 全對。
+      **穩態推論延遲 0.070 s vs 1.60 s 重規劃窗口 = 23 倍餘裕**(warmup 0.594 s)
+- [x] 12 顆馬達實測全部正常回應(11.8-11.9 V);相機 obs key 確認為不帶前綴的
+      `center`/`wrist_left`/`wrist_right`
+- [ ] **首次帶電**:1 集、`max_relative_target` 全設 0.5、手放電源開關
+- [ ] **全速單集**,跟 `lerobot-replay` 的真人 demo 並排比對速度(驗 10 Hz 是否正確)
+- [ ] **20 集正式跑**,再換純 sim checkpoint 重跑一輪做對照
+
+[12-real-evaluation]: https://docs.nvidia.com/learning/physical-ai/sim-to-real-so-101/latest/12-real-evaluation.html
 
 ---
 
 ## Phase 9 — 進階 sim-to-real 策略(尚未探索)
 
-參考官方教學後半段(Strategy 3、Strategy 4),目前**還沒碰過**,先記錄下來供之後規劃。這兩者官方文件都只寫
-**單臂**流程,套到雙臂前都要先想清楚怎麼擴。
+官方教學後半段的 Strategy 3 / 4,**還沒碰過**,先記錄路徑。兩者官方文件都只寫**單臂**流程,
+套到雙臂前要先想清楚怎麼擴。
 
-### Cosmos 資料增強(對應官方 [14-strategy3-cosmos](https://docs.nvidia.com/learning/physical-ai/sim-to-real-so-101/latest/14-strategy3-cosmos.html))
+**Cosmos 資料增強**(官方 [14-strategy3-cosmos](https://docs.nvidia.com/learning/physical-ai/sim-to-real-so-101/latest/14-strategy3-cosmos.html))——
+用 world foundation model 把既有 demo 做 video-to-video,生成「光照/背景/物件位置不同、任務結構
+不變」的變體,跟 DR 互補而非取代。**雙臂待解**:官方是單相機單臂,3 相機要嘛三路各跑一次、
+要嘛先確認 Cosmos 支不支援多視角一致性,否則生成的變體會對不上。
 
-用 NVIDIA Cosmos(world foundation model)把既有 demo 影片做 video-to-video 轉換,同一段操作生成
-「光照/背景/物件位置不同,但任務結構不變」的變體,官方測過 75 sim + 7~70 段 Cosmos 增強資料的組合。
-定位在 co-training 之後、SAGE+GapONet 之前,跟 DR 是互補而非取代關係。
-**雙臂待想清楚**:官方是單相機單臂的 video-to-video,雙臂 3 相機(`center`/`wrist_left`/`wrist_right`)
-要嘛三路都各自跑一次轉換、要嘛先確認 Cosmos 是否支援多視角一致性,否則三個相機生成的變體可能對不上。
+**SAGE + GapONet**(官方 [15-strategy4-sage](https://docs.nvidia.com/learning/physical-ai/sim-to-real-so-101/latest/15-strategy4-sage.html))——
+處理 DR / co-training / Cosmos 都沒碰到的**致動落差**(伺服 backlash、摩擦與接觸動力學建模不準、
+URDF 轉換誤差),即「同一個關節指令,sim 和真機實際動到的位置不一樣」。
+[sage](https://github.com/isaac-sim2real/sage) 跑同一組 motion file 在 sim / 真機各收一份 paired
+資料算出每個關節的 gap;[gaponet](https://github.com/jiemingcui/gaponet) 拿那份資料訓「指令 → 實際
+動作」的網路,推論時反過來補償。兩種套用模式:① 補進 sim 訓練、② 只在部署時對送出動作做補償。
+官方範例用的是 Isaac Lab `Isaac-Humanoid-Operator-Delta-Action`,不是 SO-101 原生任務,要另外
+確認怎麼接到雙臂 SO-101 config。
 
-### SAGE + GapONet(對應官方 [15-strategy4-sage](https://docs.nvidia.com/learning/physical-ai/sim-to-real-so-101/latest/15-strategy4-sage.html))
-
-處理的是 DR/co-training/Cosmos 都沒碰到的**致動落差(actuation gap)**——伺服馬達 backlash、
-摩擦力/接觸動力學建模不準、URDF 轉換誤差等,跟外觀無關,是「同一個關節指令,sim 和真機實際動到的
-位置不一樣」的問題:
-- **SAGE**(Tongji/北大/NVIDIA 合作):跑同一組 motion file 在 sim 和真機各收一份 paired 資料
-  (position/velocity/torque),比對算出每個關節的 gap 大小、視覺化。獨立 repo:
-  [isaac-sim2real/sage](https://github.com/isaac-sim2real/sage)。
-- **GapONet**(北大開發):拿 SAGE 收的 paired 資料訓一個「指令 → 實際動作」的神經網路,推論時反過來
-  補償 policy 的輸出,讓「GR00T 動作 → GapONet 補償 → 送真機」更貼近訓練時的 sim 動力學。獨立 repo:
-  [jiemingcui/gaponet](https://github.com/jiemingcui/gaponet)。官方範例用的是 Isaac Lab
-  `Isaac-Humanoid-Operator-Delta-Action` 訓練任務,不是 SO-101 原生任務,要另外確認怎麼接到這個專案的
-  雙臂 SO-101 config。
-- 兩種套用模式:① 補進 sim 訓練(讓 policy 從一開始就學到接近真機的動力學)、② 只在部署時做推論補償
-  (不改訓練、只改 `so101_dual_eval.py` 送出動作前的那一步)。
-
-**這兩塊目前定位**:等 Phase 8 的雙臂 real eval 跑起來、看到具體的 sim-to-real gap 表現後,再決定要不要
-投入 Cosmos(補視覺多樣性)或 SAGE+GapONet(補動力學落差)——不是現在的優先項,只是先記錄路徑。
+**定位**:等 Phase 8 真機 eval 跑起來、看到具體的 gap 表現後,再決定投入 Cosmos(補視覺多樣性)
+或 SAGE+GapONet(補動力學落差)。
 
 ---
 
 ## 風險預警
-- **sim eval 是自訂工程**:dual-safe 成功判定 + 12 維 client 改寫比單臂複雜,且 modality key 要對上訓練設定
+
+- **真機 eval 是自訂工程**:12 維 adapter + episode/成功率統計 + 安全機制都要自己補
 - **收 demo 難度高**:雙手同時操作要練習,初期廢片多 → 預留時間
 - **雙 leader teleop** 是自訂程式,非改設定;port 每次插拔會變,要重設 env 變數
 - **多台 RealSense** 同接 USB 可能撞頻寬 → 分 USB controller 或降 fps
-- **sim depth 太乾淨**,真機 depth 有噪 → 考慮對 sim depth 加噪(但 depth 不進 policy,影響小)
-- **12 維雙臂 embodiment** 需確認 Isaac-GR00T 是否原生支援
 - **藏試管**(Phase 4B)要確定完全不入鏡,否則半截入鏡會污染訓練影像
-- **試管 orientation**:`_UPRIGHT` 命名其實是橫躺(既有 bug/誤名),reset yaw 保持 0 避免立起的試管被大 yaw delta 弄倒
+- **試管 orientation**:`_UPRIGHT` 命名其實是橫躺(既有 bug/誤名),reset yaw 保持 0,
+  避免立起的試管被大 yaw delta 弄倒
 
 ---
 
 ## 進度日誌
-- 2026-06-23 — 建立 roadmap,釐清 USD 結構;定案間距 0.30m(真機驗證)、ego 置中、depth 只存檔
-- 2026-06-29 — **任務改為協作式**(原 handoff 作廢):任一臂拿任一支 → 中央共用架;P1~P3 完成
-- 2026-07-01 — P4A 錄製程式建好(12 維 + 3 相機,`left_*/right_*` 命名);規劃 Phase 4B(數量隨機);
-  調整並目視確認 ego 中央相機:world (-0.23,0.03,0.53)、高 ~0.53m、俯視墊子中心、HFOV≈69°(D435)
-- 2026-07-06 — 完成 P4A 協作式任務改造(兩 contact sensor + 四個 subtask obs 都吃全部 4 支);P5 DR 大致完成
-  (機器人顏色多機化、天空光、墊子旋轉加大、腕相機焦距 + 中央相機位姿抖動)
-- 2026-07-13 — **P4A 收滿 74 集乾淨資料並上 HF Hub;P4B 數量隨機(`hide_random_vials`,eval 安全)完成;
-  P5 DR 補齊(架子 8 色 + 試管透明度);純 sim 雙臂 GR00T 模型訓練完成**。
-- 2026-07-13 — **P6 sim eval 基礎設施建好**:dual-safe 成功 termination(`all_active_vials_placed_termination`)、
-  `SO101DualVialsEvalEnvCfg`/`-DR-Eval` 並註冊、`GR00TDualRemotePolicy`(對齊 SO101_bimanual modality:
-  left_arm/left_gripper/right_arm/right_gripper 12 維)、`lerobot_eval_dual` script + entry point。
-  確認訓練用 `NEW_EMBODIMENT`(不需新 tag)、相機 key 已對上(不需 rename)。`list_envs` 驗證兩個 eval env 註冊成功、
-  import 乾淨。**待真跑一輪 sim rollout 驗證成功率 + 調參**(server 記得帶 `--modality-config-path` + `--embodiment-tag new_embodiment`)
-- 2026-07-24 — **P6 sim eval 真跑一輪**:純 sim 資料微調的 GR00T checkpoint,`lerobot_eval_dual`
-  乾淨場景與 DR 場景成功率**都是 50%**(DR 沒有明顯拖累成功率,外觀 DR 魯棒性初步驗證),
-  P6 標記完成、當作後續真機評估的基準線。目前所有實驗聚焦雙臂
-  (單臂流程僅供參考架構)。開始規劃 **Phase 8 真機雙臂 eval**:參考官方單臂
-  [12-real-evaluation](https://docs.nvidia.com/learning/physical-ai/sim-to-real-so-101/latest/12-real-evaluation.html)
-  流程,對照現有 `so101_control.py`/`so101_eval.py`,列出雙臂版需要的元件差異(`SO101DualControl`、
-  `So101DualAdapter`、12 維 state 分組、3 相機、雙組硬體 CLI 參數)——僅完成技術規劃,尚未動 code。
-- 2026-07-24(補充)— 得知 Phase 7 真機硬體與資料收集**其實已經做完**:雙臂 + 3 台 D435i 已安裝校正、
-  已收 **50 集真實 demo**,並已拿去跟 sim 資料混訓出一個 **real + sim co-training checkpoint**(Phase 8
-  第一項提前完成)。同時參考官方教學後半段,把 **Cosmos 資料增強**(Strategy 3)與
-  **SAGE + GapONet 致動落差補償**(Strategy 4)記錄為新的 **Phase 9**(尚未探索)。
-- 2026-07-24(再補充)— **真機雙臂 eval 計畫大改版**:確認要改用自己的 lerobot fork
-  (`maxshen1212/lerobot` 分支 `graphen`)而不是 Isaac-GR00T 官方的 server/client 架構。實測結果:
-  該 fork 原生有 `bi_so_follower`(雙臂 robot class,`left_*`/`right_*` 前綴跟本專案資料集命名對上)
-  + `groot` policy type(LeRobot 自己重寫的 GR00T N1.7,透過 `lerobot-rollout` 本機直接推論,不需要
-  Isaac-GR00T server)。把本機 sim-only checkpoint(`checkpoint-50000`)丟進
-  `GrootPolicy.from_pretrained()` **實測成功**,1031 個權重 tensor 乾淨載入、無 missing/unexpected
-  keys,且該 checkpoint 的 `new_embodiment` 統計量正是 `left_arm(5)+left_gripper(1)+right_arm(5)+
-  right_gripper(1)`=12 維,跟本專案模型一致——**不需要透過 lerobot-train 重訓**。原本手刻
-  `SO101DualControl`/`So101DualAdapter` 的計畫改列為保底方案。目前唯一還沒打通的環節是**真機雙臂
-  real eval**(下一步:拿真正的 co-training checkpoint 重跑一次同樣的載入測試 + 確認相機命名/
-  embodiment_tag 對得上)。
+
+- 2026-06-23 — 建立 roadmap,釐清 USD 結構;定案間距 0.30m(真機驗證)、ego 相機置中
+- 2026-06-29 — **任務定為協作式**:任一臂拿任一支 → 中央共用架;P1~P3 完成
+- 2026-07-01 — P4A 錄製程式建好(12 維 + 3 相機);量測並目視確認 ego 中央相機
+  (world (-0.23,0.03,0.53)、俯視墊子中心、HFOV≈69°)
+- 2026-07-06 — P4A 協作式任務改造完成(兩 contact sensor + 四個 subtask obs 都吃全部 4 支);
+  P5 DR 大致完成
+- 2026-07-13 — **P4A 收滿 74 集並上 HF Hub;P4B(`hide_random_vials`)完成;P5 DR 補齊;
+  純 sim 雙臂 GR00T 模型訓練完成**;P6 sim eval 基礎設施建好(dual-safe termination、
+  eval env、`GR00TDualRemotePolicy`、`lerobot_eval_dual`)
+- 2026-07-24 — **P6 真跑一輪**:純 sim checkpoint 在乾淨場景與 DR 場景成功率**都是 50%**,
+  P6 完成、當作真機評估基準線。同時確認 **P7 其實已完成**(50 集真機 demo,並已與 sim 資料
+  混訓出 real + sim co-training checkpoint);Cosmos 與 SAGE+GapONet 記為 Phase 9
+- 2026-07-27 — **真機 eval 做法定案**:Isaac-GR00T 官方 server/client,以 `eval_so100.py` 為模板
+  寫雙臂版 `eval_so101_dual.py`,server 沿用 sim eval 那顆(理由:推論路徑與訓練同源、
+  sim/real 成功率可比)。查證釐清 **`use_relative_action` 應以 `processor_config.json` 為準
+  = `true`**(手臂輸出是 delta、gripper 是絕對值),弄錯會讓真機暴衝;確認相機命名
+  `wrist_left`/`center`/`wrist_right` 已對上、不需 rename。同日精簡 roadmap:移除已被取代的
+  舊方案敘述,並**全面移除 depth**(專案已不再使用 depth)
+- 2026-07-28 — **`eval_so101_dual.py` 寫完**(`Isaac-GR00T/gr00t/eval/real_robot/SO101_bimanual/`,
+  新目錄,不動上游 `SO100/`)。**235 行,官方 `eval_so100.py` 是 291 行**——同樣是
+  connect → `while True`,只差 12 維 + 3 相機 adapter 與 10 Hz 控制頻率兩件事。
+  跑法也照官方:一次執行 = 一集,人工判定與 reset 後再跑,成功率自己記。
+  (過程中一度膨脹到 1100 行——smoke/dryrun/capture-home 模式、mp4/jsonl 記錄、契約與觀測驗證、
+  連線重試、延遲統計、episode 迴圈與每集回位——經指正後全部砍掉。)
+  **查出一個會讓手臂快 3 倍的問題:控制頻率是 10 Hz 不是 30 Hz。** 官方 client 的一致做法是
+  「control rate = 訓練資料集的採集 fps」(DROID 寫死 15、SO100 用 1/30),而本專案 co-train
+  checkpoint 吃的是 10fps 資料集——已實查 `meta/info.json` `fps: 10`。錄製 config 的 30 fps 是
+  擷取頻率,進訓練前已降採樣。一個 16 步 chunk 因此覆蓋 1.6 秒,順帶讓官方擔心的 stop-and-go
+  完全不成問題。**依此決定馬達寫入不做內插**(照官方 reference code 的語意)。
+  前置驗證完成:co-train checkpoint `use_relative_action: true`、modality 契約全部吻合、
+  server 通聯實測穩態延遲 0.070 s、12 顆馬達全部正常。
+  另確認 **server 不能借用 lerobot venv**(transformers 5.5.4 vs Isaac-GR00T pin 的 4.57.3,
+  差一個主版本),client 則沿用 lerobot venv 沒問題。修掉本機 `uv sync` 卡住的
+  Git LFS pointer wheel。下一步是首次帶電。

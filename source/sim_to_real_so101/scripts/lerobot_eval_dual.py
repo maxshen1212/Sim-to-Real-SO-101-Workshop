@@ -49,7 +49,7 @@ parser.add_argument(
 parser.add_argument(
     "--lang_instruction",
     type=str,
-    default="pick up the vials and place them into the rack",
+    default="Pick up the vials and place them into the rack",
     help="Language instruction for the policy",
 )
 parser.add_argument("--rerun", action="store_true", default=False, help="Enable Rerun visualization")

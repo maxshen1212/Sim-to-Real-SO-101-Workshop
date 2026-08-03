@@ -508,7 +508,7 @@ class GR00TDualRemotePolicy:
         host: str = "localhost",
         port: int = 5555,
         action_horizon: int = 16,
-        lang_instruction: str = "pick up the vials and place them into the rack",
+        lang_instruction: str = "Pick up the vials and place them into the rack",
     ):
         self._left = left_iface
         self._right = right_iface

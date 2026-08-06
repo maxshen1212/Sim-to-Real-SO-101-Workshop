@@ -47,6 +47,21 @@ parser.add_argument(
     "--action_horizon", type=int, default=16, help="Number of action steps to execute per server query"
 )
 parser.add_argument(
+    "--steps_per_action",
+    type=int,
+    default=3,
+    help=(
+        "把每個預測動作撐住幾個 env step。env 的控制率是 60 Hz(sim.dt=1/120 x decimation=2)，"
+        "但 checkpoint 吃的是降採樣過的 10 fps 資料集，一個 action 不等於一個 env step。"
+        "要設成建立 sim-10fps 資料集時用的降採樣倍率：sim 錄製是每個 env step 推一格，"
+        "所以一格訓練資料 = 降採樣倍率個 env step。設 1 會讓手臂快 3 倍——"
+        "就是真機那邊抓到的同一個錯。"
+        "預設 3 已驗證：ChihHanShen/bimanual-so101-pickvials-sim 是 260 集 / 259,079 格，"
+        "-sim-10fps 是同樣 260 集 / 86,442 格，比值 2.997 = 每 3 格留 1 格。"
+        "重建資料集換了倍率就要改這裡，並一起調 EVAL_EPISODE_STEPS。"
+    ),
+)
+parser.add_argument(
     "--lang_instruction",
     type=str,
     default="Pick up the vials and place them into the rack",
@@ -138,9 +153,39 @@ def main():
     # create environment
     env = gym.make(args_cli.task, cfg=env_cfg)
 
+    # 這支腳本只支援單一 env：觀測一律取 [0]、policy 算出的 action 會廣播到所有 env，
+    # 成功率也是用 .any() 統計 —— num_envs > 1 會靜靜地算錯，不如直接擋掉。
+    if env.unwrapped.num_envs != 1:
+        env.close()
+        raise ValueError(
+            f"lerobot_eval_dual 只支援 --num_envs 1（目前 {env.unwrapped.num_envs}）："
+            "obs 只取 env 0、action 會廣播到全部 env，成功率統計不正確。"
+        )
+
+    if args_cli.steps_per_action < 1:
+        env.close()
+        raise ValueError(f"--steps_per_action 必須 >= 1（目前 {args_cli.steps_per_action}）。")
+
     print(f"[INFO]: Gym observation space: {env.observation_space}")
     print(f"[INFO]: Gym action space: {env.action_space}")
     print(f"[INFO]: Click 'R' to reset the world")
+
+    # 把控制頻率印出來對帳。要對齊的是「錄製時一格資料等於幾個 env step」，不是資料集標的
+    # fps：sim 錄製是每個 env step 推一格（見 lerobot_agent_dual.py），標籤卻寫 30 fps，
+    # 所以 sim 資料集的 fps 標籤本來就不等於 sim 時間。steps_per_action 要設成建立
+    # bimanual-so101-pickvials-sim-10fps 時用的降採樣倍率。
+    # 附帶結果：倍率 3 → policy 在 sim time 是 20 Hz（不是 10 Hz），這是正常的。
+    control_hz = 1.0 / env.unwrapped.step_dt
+    policy_hz = control_hz / args_cli.steps_per_action
+    max_actions = env.unwrapped.max_episode_length // args_cli.steps_per_action
+    print(
+        f"[INFO]: env {control_hz:.1f} Hz x {args_cli.steps_per_action} steps/action "
+        f"-> policy {policy_hz:.1f} Hz (sim time)。steps/action 必須等於 sim 資料集的降採樣倍率。"
+    )
+    print(
+        f"[INFO]: Episode 上限 {env.unwrapped.max_episode_length} env steps "
+        f"= {max_actions} 個 policy 動作 = {env.unwrapped.max_episode_length_s:.1f} s sim time"
+    )
 
     # cameras（自動發現 camera_ 開頭的 scene 物件 → wrist_left / wrist_right / center）
     cameras = {}
@@ -208,6 +253,10 @@ def main():
     right_rest = torch.tensor(DUAL_RIGHT_START_POSE, device=env.unwrapped.device)
     initial_action = torch.cat([left_rest, right_rest], dim=0)  # (12,)
 
+    # WARMUP_STEPS 的單位是 env step（不是 policy 動作），跟 `step` 一致。
+    WARMUP_STEPS = 10
+    steps_per_action = args_cli.steps_per_action
+
     step = 0
     num_episodes = 0
     num_successes = 0
@@ -226,7 +275,7 @@ def main():
                     bar_format='{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}]'
                 )
 
-            if step < 10:  # warmup
+            if step < WARMUP_STEPS:  # warmup
                 actions[:] = initial_action
             else:
                 joint_pos_left = obs["policy"]["joint_pos_left"][0].clone()
@@ -235,18 +284,30 @@ def main():
                     joint_pos_left, joint_pos_right, obs["visual"], log=True
                 )
 
-            obs, rewards, terminated, truncated, info = env.step(actions)
+            # 同一個動作撐 steps_per_action 個 env step。sim 裡沒有真機 client 的 sleep 可用，
+            # 這就是「control rate = 訓練資料集 fps」在 sim 的等價做法：env 是 60 Hz，資料是
+            # 10 fps，一個 action 送一步會讓手臂比訓練資料快 steps_per_action 倍。
+            is_terminated = False
+            is_truncated = False
+            for _ in range(steps_per_action):
+                obs, rewards, terminated, truncated, info = env.step(actions)
 
-            if record_video and video_cam_key in obs["visual"]:
-                frames.append(_to_uint8_frame(obs["visual"][video_cam_key]))
+                if record_video and video_cam_key in obs["visual"]:
+                    frames.append(_to_uint8_frame(obs["visual"][video_cam_key]))
 
-            step += 1
+                step += 1
 
-            if pbar is not None:
-                pbar.update(1)
+                if pbar is not None:
+                    pbar.update(1)
 
-            is_terminated = terminated.item() if terminated.numel() == 1 else terminated.any().item()
-            is_truncated = truncated.item() if truncated.numel() == 1 else truncated.any().item()
+                is_terminated = (
+                    terminated.item() if terminated.numel() == 1 else terminated.any().item()
+                )
+                is_truncated = (
+                    truncated.item() if truncated.numel() == 1 else truncated.any().item()
+                )
+                if is_terminated or is_truncated:
+                    break
 
             if is_terminated or is_truncated:
                 if pbar is not None:
@@ -261,6 +322,11 @@ def main():
 
                 _write_video(num_episodes, episode_success)
                 frames.clear()
+
+                # 收工判斷放在 reset 之前：擺在迴圈尾端會多開一集、多跑一步、
+                # 多印一條假的進度條才退出。
+                if num_episodes >= args_cli.num_episodes:
+                    break
 
                 obs, _ = env.reset()
                 policy.reset()
@@ -280,23 +346,16 @@ def main():
                 step = 0
                 continue
 
-            if num_episodes >= args_cli.num_episodes:
-                if pbar is not None:
-                    pbar.close()
-                    pbar = None
-                print(f"[INFO]: Evaluated {args_cli.num_episodes} episodes")
-                print(f"[INFO]: Success Rate: {num_successes}/{args_cli.num_episodes} ({success_rate:.1f}%)")
-                env.close()
-                simulation_app.close()
-
+    if pbar is not None:
+        pbar.close()
+    print(f"[INFO]: Evaluated {num_episodes} episodes")
+    if num_episodes > 0:
+        print(f"[INFO]: Success Rate: {num_successes}/{num_episodes} ({success_rate:.1f}%)")
     env.close()
 
 
 if __name__ == "__main__":
 
     main()
-
-    while True:
-        simulation_app.update()
 
     simulation_app.close()

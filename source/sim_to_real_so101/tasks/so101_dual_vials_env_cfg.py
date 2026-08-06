@@ -501,10 +501,20 @@ class SO101DualVialsTerminationsCfg:
 # 用 __post_init__ 把實例上的 event 設 None(Isaac Lab 官方 disable term 做法),
 # 保證生效、不依賴 configclass 對「無標註覆寫成 None」的細節。
 # (要量「數量魯棒性」把下面那行 reset_hide_vials = None 註解掉即可。)
-# episode 超時上限（單位：秒！不是分鐘，也不要除 60）。
-# 錄的示範平均 ~34 秒/集；給 ~5x 餘裕當 timeout（放不完就走 time_out 進下一集）。
-# 想更寬鬆就調大、想 eval 快就調小（失敗的 episode 會一直跑到這個秒數才結束）。
-EVAL_EPISODE_LENGTH_S = 1350 / 60
+# episode 超時上限。Isaac Lab 的欄位單位是「秒」，而 max_episode_length(步) =
+# episode_length_s / (sim.dt * decimation) = episode_length_s * 60。真正該想的單位是
+# env step，所以這裡先定步數再換算成秒，不要再寫成裸的 `x / 60` 讓人誤讀成分鐘。
+#
+# 但預算真正的單位是「policy 動作數」，不是 env step：eval 會把每個預測動作撐住
+# --steps_per_action 個 env step（見 scripts/lerobot_eval_dual.py，理由是訓練資料是
+# 降採樣過的 10 fps，一個 action 不等於一個 env step），所以
+#     policy 動作數 = EVAL_EPISODE_STEPS / steps_per_action
+# sim 示範平均 332 格/集（86,442 frames / 260 episodes，= 996 env steps）。預設
+# steps_per_action=3 時 5000 步 = 1666 個動作 ≈ 示範的 5 倍餘裕（放不完就走 time_out）。
+# ⚠️ 改 --steps_per_action 就要一起改這裡，否則餘裕倍數會跟著跑掉。
+# 想更寬鬆就調大、想 eval 快就調小（失敗的 episode 會一直跑到用完才結束）。
+EVAL_EPISODE_STEPS = 1700
+EVAL_EPISODE_LENGTH_S = EVAL_EPISODE_STEPS / 60
 
 
 # eval 起始姿態（弧度，SO101_JOINTS 順序：Rotation, Pitch, Elbow, Wrist_Pitch, Wrist_Roll, Jaw）。
@@ -535,7 +545,7 @@ def _use_dataset_start_pose(events) -> None:
 
 @configclass
 class SO101DualVialsEvalEnvCfg(SO101DualVialsEnvCfg):
-    """乾淨場景 + 終止條件（評估純 sim policy）。固定 4 支、episode 上限 180 秒。"""
+    """乾淨場景 + 終止條件（評估純 sim policy）。固定 4 支、episode 上限見 EVAL_EPISODE_STEPS。"""
 
     terminations: SO101DualVialsTerminationsCfg = (
         SO101DualVialsTerminationsCfg()
@@ -550,7 +560,7 @@ class SO101DualVialsEvalEnvCfg(SO101DualVialsEnvCfg):
 
 @configclass
 class SO101DualVialsEvalDREnvCfg(SO101DualVialsDREnvCfg):
-    """DR 場景 + 終止條件（最嚴格：外觀隨機 + 評估）。固定 4 支、episode 上限 180 秒。"""
+    """DR 場景 + 終止條件（最嚴格：外觀隨機 + 評估）。固定 4 支、episode 上限見 EVAL_EPISODE_STEPS。"""
 
     terminations: SO101DualVialsTerminationsCfg = (
         SO101DualVialsTerminationsCfg()

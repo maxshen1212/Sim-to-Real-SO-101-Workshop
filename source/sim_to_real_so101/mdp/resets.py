@@ -458,6 +458,7 @@ def hide_random_vials(
         max_count: int = 4,
         hide_xy: tuple[float, float] = (2.0, 2.0),
         hide_z: float = 0.05,
+        hide_spacing: float = 0.2,
 ):
     """Keep a random number of vials on the mat, park the rest off-scene.
 
@@ -466,6 +467,12 @@ def hide_random_vials(
     count in ``[min_count, max_count]`` to keep and teleports the remaining vials
     far away (``hide_xy``, ~2 m out) so they are out of every camera's view and
     unreachable. Each hidden vial gets a distinct spot and zeroed velocity.
+
+    The parking spots are spaced by ``hide_spacing`` along X. That has to clear the
+    vial's own footprint: the vial is laid on its side (see ``_UPRIGHT`` in the env
+    cfg) so it occupies ~0.1165 m along world X. The old 0.1 m spacing made every
+    pair of parked vials interpenetrate by 16.5 mm and shove each other around out
+    of frame -- harmless for the task, but it dirties the contact/velocity state.
 
     The grasp/placement observations consider all vials, but a parked vial is
     never contacted or placed, so effectively only the on-mat vials count.
@@ -489,7 +496,7 @@ def hide_random_vials(
             continue
         k = len(env_subset)
         pos = torch.tensor(
-            [hide_xy[0] + 0.1 * vi, hide_xy[1], hide_z], device=device
+            [hide_xy[0] + hide_spacing * vi, hide_xy[1], hide_z], device=device
         ).unsqueeze(0).repeat(k, 1) + env.scene.env_origins[env_subset]
         quat = v.data.default_root_state[env_subset][:, 3:7]
         pose = torch.cat([pos, quat], dim=-1)

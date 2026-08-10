@@ -95,6 +95,26 @@ uv pip install --python ~/env_isaaclab/bin/python \
     -e ~/sim2real/Sim-to-Real-SO-101-Workshop/source/sim_to_real_so101/
 ```
 
+## Step 6 — GR00T client slice (for real-robot eval)
+
+The real-robot eval **client** (`eval_so101_dual.py`) needs `lerobot` *and* a thin slice of
+`gr00t` (`PolicyClient`, which only imports numpy/msgpack/zmq — never torch). The **server** stays
+in Isaac-GR00T's own 3.12 `.venv`; only the client lives here.
+
+```bash
+# uv refuses this (gr00t declares requires-python >=3.12,<3.13; this venv is 3.11),
+# so use pip, which has --ignore-requires-python. uv has no equivalent flag.
+~/env_isaaclab/bin/python -m pip install \
+    --no-deps --ignore-requires-python --no-build-isolation \
+    -e ~/sim2real/Isaac-GR00T
+```
+
+- `--no-deps` is essential: gr00t pins `torch==2.9.0` / `transformers==4.57.3` and would wreck
+  Isaac's pins. The client half needs none of it.
+- The 3.12 requirement covers gr00t's training/model code, not the ZMQ client. Verified working
+  on 3.11 — but treat anything else in the package as unsupported here.
+- Undo with `~/env_isaaclab/bin/python -m pip uninstall -y gr00t`.
+
 ---
 
 ## Verify
@@ -136,62 +156,3 @@ lerobot-calibrate --help >/dev/null && echo "console scripts OK"
 list_envs                                          # 12 envs; 6 Teleop- (single) + 6 Dual- (bimanual)
 zero_agent --task Lerobot-So101-Dual-Vials-To-Rack # scene loads, no hardware needed
 ```
-
----
-
-## Restore
-
-[requirements-isaac.lock](requirements-isaac.lock) pins the whole env (290 packages) and replaces
-Steps 3–5:
-
-```bash
-uv venv ~/env_isaaclab --python 3.11        # only if the venv is gone
-uv pip sync --python ~/env_isaaclab/bin/python \
-    ~/sim2real/Sim-to-Real-SO-101-Workshop/requirements-isaac.lock
-```
-
-It carries its own `--extra-index-url` lines for `pypi.nvidia.com` and `download.pytorch.org/whl/cu128`.
-Not covered: the venv must be Python 3.11, and `~/IsaacLab` / `~/sim2real/lerobot` / this repo must exist.
-
-Regenerate after intentional changes with `uv pip freeze --python ~/env_isaaclab/bin/python`, then
-re-add the two `--extra-index-url` lines.
-
----
-
-## Commands
-
-```bash
-source ~/env_isaaclab/bin/activate
-
-list_envs
-zero_agent   --task Lerobot-So101-Dual-Vials-To-Rack     # zero actions
-random_agent --task Lerobot-So101-Dual-Base              # random actions
-
-# bimanual teleop + record (two SO-101 leaders)
-lerobot_agent_dual --task Lerobot-So101-Dual-Vials-To-Rack \
-    --repo_id <hf_id/dataset> \
-    --repo_root ~/sim2real/Sim-to-Real-SO-101-Workshop/datasets/<dataset> \
-    --task_name "Pick up the vials and place them into the rack"
-
-# eval vs GR00T server on localhost:5555
-lerobot_eval_dual --task Lerobot-So101-Dual-Vials-To-Rack-Eval --num_episodes 10
-
-lerobot_push_dataset --repo-id <hf_id/dataset> --root <path>   # note: --repo-id, hyphenated
-```
-
-`--headless` runs without a window. Full bimanual workflow (ports, calibration, recording keys,
-dataset cleanup, GR00T eval): [run_cheatsheet.md](run_cheatsheet.md).
-
----
-
-## Paths
-
-| Item                  | Path                                                             |
-| --------------------- | ---------------------------------------------------------------- |
-| venv                  | `~/env_isaaclab` (Python 3.11, Isaac Sim installed inside)        |
-| Isaac Lab             | `~/IsaacLab`                                                      |
-| LeRobot — sim + real  | `~/sim2real/lerobot` — branch `n1.7-graphen` (v0.4.3, base `e670ac5d`) |
-| Workshop source       | `~/sim2real/Sim-to-Real-SO-101-Workshop/source/sim_to_real_so101` |
-| Lock file             | `~/sim2real/Sim-to-Real-SO-101-Workshop/requirements-isaac.lock`  |
-| Datasets              | `~/sim2real/Sim-to-Real-SO-101-Workshop/datasets`                 |
-| Captured images       | `~/sim2real/Sim-to-Real-SO-101-Workshop/outputs/captured_images`  |

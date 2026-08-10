@@ -16,12 +16,13 @@
 # 雙臂遙操作 + 錄製（Phase 4）：兩支 SO-101 leader → 12 維動作 → 雙臂 sim，
 # 按 S 起停錄製，寫成 12 維(left_*/right_*) state/action + 3 相機的 LeRobotDataset。
 #
-# port 每次插拔會變，用 `lerobot-find-port` 找出後 export：
-#   export TELEOP_PORT_LEFT=/dev/ttyACM0   TELEOP_ID_LEFT=<左臂校正id>
-#   export TELEOP_PORT_RIGHT=/dev/ttyACM1  TELEOP_ID_RIGHT=<右臂校正id>
-#   sudo chmod 666 $TELEOP_PORT_LEFT $TELEOP_PORT_RIGHT
+#
+# port 走 udev 固定名稱（`graphen-setup-udev --apply` 一次設定，之後插拔都不會變），
+# 校正檔與真機共用 lerobot/calibration/bimanual_leader/ 底下同樣那兩個 JSON。
+# 平常不需要設任何環境變數；要覆寫才用 TELEOP_PORT_LEFT / TELEOP_ID_LEFT / ...
 import argparse
 import os
+from pathlib import Path
 from isaaclab.app import AppLauncher
 
 parser = argparse.ArgumentParser(description="Isaac Lab dual-arm SO-101 teleop + record.")
@@ -29,11 +30,17 @@ parser.add_argument("--disable_fabric", action="store_true", default=False)
 parser.add_argument("--num_envs", type=int, default=None)
 parser.add_argument("--task", type=str, default="Lerobot-So101-Dual-Vials-To-Rack")
 # 左臂 leader
-parser.add_argument("--port_left", type=str, default=os.getenv("TELEOP_PORT_LEFT", "/dev/ttyACM0"))
-parser.add_argument("--id_left", type=str, default=os.getenv("TELEOP_ID_LEFT", "leader_left"))
+parser.add_argument("--port_left", type=str, default=os.getenv("TELEOP_PORT_LEFT", "/dev/ttyLeaderLeft"))
+parser.add_argument("--id_left", type=str,
+                    default=os.getenv("TELEOP_ID_LEFT", "bimanual_so101_leader_left"))
 # 右臂 leader
-parser.add_argument("--port_right", type=str, default=os.getenv("TELEOP_PORT_RIGHT", "/dev/ttyACM1"))
-parser.add_argument("--id_right", type=str, default=os.getenv("TELEOP_ID_RIGHT", "leader_right"))
+parser.add_argument("--port_right", type=str, default=os.getenv("TELEOP_PORT_RIGHT", "/dev/ttyLeaderRight"))
+parser.add_argument("--id_right", type=str,
+                    default=os.getenv("TELEOP_ID_RIGHT", "bimanual_so101_leader_right"))
+# 校正檔目錄 —— 與真機共用同一份，不要讓它掉回 LeRobot 的 HF cache
+parser.add_argument("--calibration_dir", type=str,
+                    default=os.getenv("TELEOP_CALIBRATION_DIR",
+                                      "/home/graphen/sim2real/lerobot/calibration/bimanual_leader"))
 # 錄製（三個都給才會啟用）
 parser.add_argument("--repo_id", type=str, default=None)
 parser.add_argument("--repo_root", type=str, default=None)
@@ -63,9 +70,33 @@ from sim_to_real_so101.utils.lerobot_interface import LeRobotSO101Interface
 from sim_to_real_so101.utils.lerobot_recorder import LeRobotRecorder
 
 
-def _make_leader(device, port, robot_id):
+def _check_calibration(robot_id, calibration_dir):
+    """校正檔不在就直接停,不要讓 LeRobot 靜靜地跳進「重新校準」流程。
+
+    最常見的原因是 shell 裡還留著舊的 TELEOP_ID_* / TELEOP_CALIBRATION_DIR export
+    —— 它們會蓋掉本檔的預設值,於是去找一個不存在的檔名。
+    """
+    if not calibration_dir:
+        return
+    fpath = Path(calibration_dir) / f"{robot_id}.json"
+    if fpath.is_file():
+        print(f"[INFO]: calibration {fpath}")
+        return
+    raise SystemExit(
+        f"\n[ERROR]: 找不到校正檔 {fpath}\n"
+        f"         id={robot_id}  calibration_dir={calibration_dir}\n"
+        f"         這兩個值可被環境變數覆寫 —— 先檢查 `env | grep TELEOP`,\n"
+        f"         有殘留就 `unset TELEOP_PORT_LEFT TELEOP_ID_LEFT TELEOP_PORT_RIGHT "
+        f"TELEOP_ID_RIGHT TELEOP_CALIBRATION_DIR`。\n"
+        f"         校正指令見 run_cheatsheet.md 第 2 步。\n"
+    )
+
+
+def _make_leader(device, port, robot_id, calibration_dir=None):
+    _check_calibration(robot_id, calibration_dir)
     iface = LeRobotSO101Interface(
         device=device, port=port, id=robot_id, cameras={}, fps=30, kind="leader",
+        calibration_dir=calibration_dir,
     )
     iface.init_device()
     iface.connect()
@@ -98,9 +129,11 @@ def main():
 
     # 兩支 leader
     print(f"[INFO]: LEFT  leader port={args_cli.port_left}  id={args_cli.id_left}")
-    iface_left = _make_leader(env.unwrapped.device, args_cli.port_left, args_cli.id_left)
+    iface_left = _make_leader(env.unwrapped.device, args_cli.port_left, args_cli.id_left,
+                              args_cli.calibration_dir)
     print(f"[INFO]: RIGHT leader port={args_cli.port_right} id={args_cli.id_right}")
-    iface_right = _make_leader(env.unwrapped.device, args_cli.port_right, args_cli.id_right)
+    iface_right = _make_leader(env.unwrapped.device, args_cli.port_right, args_cli.id_right,
+                               args_cli.calibration_dir)
 
     # 12 維關節命名：left_* 然後 right_*（順序同 DualActionsCfg：左 0:6、右 6:12）
     dual_joint_names = (

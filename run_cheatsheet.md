@@ -9,28 +9,39 @@
 source ~/env_isaaclab/bin/activate
 ```
 
-## 1. 找 port + 授權(每次插拔都會變,要重跑)
+## 1. Port(一次性,之後插拔都不用再做)
+
+port 走 udev 固定名稱,不再需要 `lerobot-find-port` + 每次 export:
 
 ```bash
-lerobot-find-port          # 拔插左臂 → 記下它的 /dev/ttyACM?
-lerobot-find-port          # 拔插右臂 → 記下它的 /dev/ttyACM?
-
-export TELEOP_PORT_LEFT=/dev/ttyACM0   TELEOP_ID_LEFT=leader_left
-export TELEOP_PORT_RIGHT=/dev/ttyACM1  TELEOcP_ID_RIGHT=leader_right
-
-echo "LEFT  $TELEOP_PORT_LEFT  id=$TELEOP_ID_LEFT"
-echo "RIGHT $TELEOP_PORT_RIGHT id=$TELEOP_ID_RIGHT"
-
-sudo chmod 666 $TELEOP_PORT_LEFT $TELEOP_PORT_RIGHT
-sudo chmod -R 777 ~/.cache/huggingface/lerobot/     # 校正檔寫得進去
+graphen-setup-udev              # 檢查 /dev/tty{Leader,Follower}{Left,Right} 是否都在
+graphen-setup-udev --apply      # 第一次或換電腦時才需要(需 sudo)
 ```
 
-## 2. 校正兩支 leader(id 必須不同,只需做一次;校正檔會存起來)
+規則綁 USB 序號,而且帶 `MODE="0666"`,所以**也不用再 `chmod`**。
+
+## 2. 校正兩支 leader
+
+> **校正檔與真機共用同一份**,統一存在 `~/sim2real/lerobot/calibration/`(git 追蹤)。
+> 以前這裡會寫進 `~/.cache/huggingface/lerobot/`,結果同兩支手臂有兩份獨立校正,
+> 在馬達 EEPROM 裡互相覆蓋。**不要再用 HF cache 那條路。**
 
 ```bash
-lerobot-calibrate --teleop.type=so101_leader --teleop.port=$TELEOP_PORT_LEFT  --teleop.id=$TELEOP_ID_LEFT
-lerobot-calibrate --teleop.type=so101_leader --teleop.port=$TELEOP_PORT_RIGHT --teleop.id=$TELEOP_ID_RIGHT
+CALIB=~/sim2real/lerobot/calibration/bimanual_leader
+
+lerobot-calibrate --teleop.type=so101_leader --teleop.port=/dev/ttyLeaderLeft \
+  --teleop.id=bimanual_so101_leader_left  --teleop.calibration_dir=$CALIB
+lerobot-calibrate --teleop.type=so101_leader --teleop.port=/dev/ttyLeaderRight \
+  --teleop.id=bimanual_so101_leader_right --teleop.calibration_dir=$CALIB
+
+cd ~/sim2real/lerobot && git add calibration/ && git commit -m "calib: baseline for the firest experiment on 08/10"
 ```
+
+**每個關節都要推到真正的機械硬限位** —— 這版是 `RANGE_M100_100`(±100),span 直接就是尺度,
+掃不到底整條軸的 gain 就錯了。完整說明見 [lerobot/CALIBRATION.md](../lerobot/CALIBRATION.md)。
+
+`lerobot_agent_dual` 的預設值已經指向上面這些 port / id / 目錄,平常不用設任何環境變數;
+要覆寫才用 `TELEOP_PORT_LEFT` / `TELEOP_ID_LEFT` / `TELEOP_CALIBRATION_DIR`(或 `--port_left` 等旗標)。
 
 ## 3.(選用)先驗場景 / 驅動再錄
 
@@ -84,7 +95,7 @@ hf auth login                       # 第一次才要
 
 # 注意旗標:--repo-id / --root(連字號),--root 要對上錄製的 $DATASET_ROOT
 lerobot_push_dataset --repo-id ChihHanShen/bimanual-so101-pickvials --root $(pwd)/datasets/bimanual-so101-pickvials
-```
+
 # 私有資料集加 --private
 ```
 
@@ -147,14 +158,18 @@ python tools/delete_episodes.py 47 30      # 刪掉 file-047、file-030 那兩�
 # Eval(Phase 6:純 sim 雙臂 GR00T 在 sim 裡評估)
 
 **全本機、無 Docker**、兩段式、兩個**獨立環境**,透過 ZMQ `localhost:5555` 溝通:
-- **終端機 A**:GR00T server 跑在 `~/Isaac-GR00T` 的 **uv 環境**(`uv run python ...`,首次自動建)。
-- **終端機 B**:`lerobot_eval_dual` 跑在 **`~/env_isaaclab`**,用專案自己的 `gr00t_client` 連 server(跟 GR00T 的 uv 環境無關)。
+- **終端機 A**:GR00T server 跑在 `~/sim2real/Isaac-GR00T` 的 **uv 環境**(`uv run python ...`)。
+- **終端機 B**:`lerobot_eval_dual` 跑在 **`~/env_isaaclab`**,用專案自己的 `gr00t_client` 連 server。
 
 state/action 依 `examples/SO101_bimanual/modality.json` 分成
 `left_arm`(0:5)/`left_gripper`(5:6)/`right_arm`(6:11)/`right_gripper`(11:12);
 相機 `center`/`wrist_left`/`wrist_right` 已對上,不用 rename。
 
-## A. 起 GR00T server(終端機 A:`~/Isaac-GR00T`,uv 環境)
+> **sim eval 不讀校正檔。** `lerobot_eval_dual` 建的兩個 interface 只用它們的 joint mapping
+> (`SO101_USD_MAPPING`,硬編碼),`port=None`、從不 connect,所以第 2 步那組校正檔跟這裡無關。
+> 唯一會抓校正檔的是 `lerobot_agent_dual`(真的接兩支 leader)。
+
+## A. 起 GR00T server(終端機 A:`~/sim2real/Isaac-GR00T`,uv 環境)
 
 ⚠️ **`--model-path` 要指到 checkpoint 那一層(有 config.json 的目錄),不是 HF repo 根。**
 本專案的 HF repo `ChihHanShen/gr00t-n1.7-so101-bimanual-pickvials` 把 checkpoint **巢狀**放在
@@ -164,21 +179,28 @@ state/action 依 `examples/SO101_bimanual/modality.json` 分成
 先下載選定的 checkpoint(`*` 會遞迴含 experiment_cfg/ 的 stats),再指本機路徑:
 
 ```bash
-cd ~/Isaac-GR00T
+cd ~/sim2real/Isaac-GR00T
 
-# 1) 下載 checkpoint-50000(最新;約 6GB。要比較就換成 15000/10000/5000)
+# 1) 下載(約 6GB)。--local-dir 之後就是 --model-path 的前綴,兩者要對得起來
 uv run hf download ChihHanShen/gr00t-n1.7-so101-bimanual-pickvials \
-  --include "pickvials-n1p7-run2/checkpoint-20000/*" \
+  --include "pickvials-n1p7-run2/checkpoint-50000/*" \
   --exclude "*global_step*" \
-  --local-dir ~/models/bimanual-pickvials
+  --local-dir ~/models/bimanual-pickvials-sim
 
 # 2) 起 server,--model-path 指到那個 checkpoint 目錄
 uv run python gr00t/eval/run_gr00t_server.py \
-    --model-path ~/models/bimanual-pickvials-cotrain/pickvials-n1p7-run3/checkpoint-25000 \
+    --model-path ~/models/bimanual-pickvials-sim/pickvials-n1p7-run2/checkpoint-50000 \
     --embodiment-tag new_embodiment \
     --modality-config-path examples/SO101_bimanual/so101_bimanual_config.py \
     --device cuda:0
 ```
+
+本機目前有兩個 checkpoint,**換哪一個就同時改 `--model-path`**:
+
+| | 路徑 |
+| --- | --- |
+| 純 sim(Phase 6 基準線 50%) | `~/models/bimanual-pickvials-sim/pickvials-n1p7-run2/checkpoint-50000` |
+| real + sim co-training | `~/models/bimanual-pickvials-cotrain/pickvials-n1p7-run3/checkpoint-25000` |
 
 - `--embodiment-tag new_embodiment` = 訓練時用的 tag(checkpoint 的 embodiment_id.json 確認 `new_embodiment: 10`)。
 - `--modality-config-path` 指向 bimanual config(.py),讓 server 知道 12 維怎麼切、3 相機怎麼對。

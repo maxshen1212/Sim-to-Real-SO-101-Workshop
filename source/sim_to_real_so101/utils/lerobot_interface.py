@@ -13,6 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 from collections import deque
+from pathlib import Path
 
 import numpy as np
 import torch
@@ -71,10 +72,12 @@ class LeRobotSO101Interface:
         fps: int,
         kind: str = "leader",
         rename_map: dict = None,
+        calibration_dir: str = None,
     ):
 
         self.port = port
         self.id = id
+        self.calibration_dir = calibration_dir
         self.cameras = cameras
         self.device = device
         self.fps = fps
@@ -110,11 +113,18 @@ class LeRobotSO101Interface:
         return cameras
 
     def make_cfg(self):
+        # calibration_dir is passed through so sim reads the SAME calibration JSONs as the
+        # real robot (lerobot/calibration/...). Left as None it falls back to LeRobot's HF
+        # cache, which silently gives the arms a second, independent calibration -- the two
+        # then fight over the motors' EEPROM every time you switch between sim and real.
+        kwargs = {"port": self.port, "id": self.id}
+        if self.calibration_dir:
+            kwargs["calibration_dir"] = Path(self.calibration_dir)
+
         if self.kind == "leader":
-            return SO101LeaderConfig(port=self.port, id=self.id)
+            return SO101LeaderConfig(**kwargs)
         elif self.kind == "follower":
-            cameras = self.make_cameras_cfg()
-            return SO101FollowerConfig(port=self.port, id=self.id, cameras=cameras)
+            return SO101FollowerConfig(cameras=self.make_cameras_cfg(), **kwargs)
 
     def init_device(self, visualize: bool = False):
         self.cfg = self.make_cfg()

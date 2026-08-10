@@ -278,35 +278,65 @@ URDF 轉換誤差),即「同一個關節指令,sim 和真機實際動到的位�
 
 ---
 
-## 技術債 — 往 0.4.x 收斂成單一 LeRobot repo
+## 技術債 — 往 0.4.x 收斂成單一 LeRobot repo ✅ 程式碼與環境已完成
 
-**現況**:同一個 fork 拆成兩個 worktree,兩邊都要維護。
+**現況**:已收斂。**一個 checkout、一個 venv。**
 
 | Checkout | Branch | LeRobot | requires-python | 用途 |
 | --- | --- | --- | --- | --- |
-| `~/sim2real/lerobot` | `graphen` | 0.6.1 | >=3.12 | 真機 |
-| `~/lerobot-pinned` | `sim-pinned` @ `e670ac5d` | 0.4.3 | >=3.10 | **workshop 實際 import 的** |
+| `~/sim2real/lerobot` | `n1.7-graphen` | 0.4.3 | >=3.10 | sim + 真機共用 |
 
-**代價**:任何工具/修正都要做兩次,sim 端也拿不到新版 LeRobot 的東西。
+`~/lerobot-pinned` worktree 已移除,`~/sim2real/lerobot/.venv` 已刪除,
+`~/env_isaaclab` 的 editable 安裝改指向 `~/sim2real/lerobot/src`。
 
-**方向已改為往下收斂(不再等 Isaac Sim 6.0)。** 原本的計畫是升 Isaac Sim 6.0
-把 sim 端拉上 0.6.1;現在改成把真機端拉回 0.4.3,理由:
+**尚未完成**:下面那六步真機驗證**一步都還沒跑**(需要四支手臂都接上)。
+
+```
+1. lerobot-calibrate 按 ENTER 重用既有校準檔,確認能寫回馬達(四支)
+2. 補校 leader_right 的 wrist_roll(用單臂 so101_leader 型別,
+   見 lerobot/CALIBRATION.md §1.2 末尾)
+   → 校完 span 應落在 3800-3950,不再是 4095
+3. lerobot-teleoperate → 每個關節推到兩端硬限位,確認 leader/follower 都讀到 ≈ ±100
+   ← 這一步同時驗證 use_degrees 與 YAML 欄位都對了
+4. lerobot-record 錄 1 集 → 檢查 stats.json 的值域落在 ±100 內(不再有 ±164)
+   → 確認 dataset 的 camera key 是 wrist_left / center / wrist_right(無前綴)
+   → 順便看 fps 穩不穩(0.4.x 改用 image writer thread 寫 PNG 再編碼,
+     不穩就把 num_image_writer_processes 調到 1 以上)
+5. sim 端不動,確認 lerobot_agent_dual / lerobot_eval_dual 仍正常
+6. 正式重收真機資料
+```
+
+<details>
+<summary>當初為什麼選「往下收斂」而不是升 Isaac Sim 6.0</summary>
+
+原本的計畫是升 Isaac Sim 6.0 把 sim 端拉上 0.6.1;後來改成把真機端拉回 0.4.3,理由:
 
 1. **NVIDIA 的 GR00T 參考 pipeline 本來就是 0.4.x。**
    `Isaac-GR00T/gr00t/eval/real_robot/SO100/pyproject.toml:17` pin 的是
    `lerobot@c75455a6`(v0.4.1,2025-10-23)。我們的 `e670ac5d` 是 v0.4.3
    (2026-01-05)——**同一條 0.4.x 線,而且更新**。
 2. **0.4.x 預設就是 `use_degrees=False`(±100)**,與 NVIDIA 的慣例一致;
-   0.6.1 把預設翻成 `True`(度),才造成 sim/真機的資料慣例分歧(見風險預警)。
+   0.6.1 把預設翻成 `True`(度),才造成 sim/真機的資料慣例分歧。
 3. **不需要動 Isaac Sim。** 0.4.x 的 `requires-python` 是 `>=3.10`,
    現有的 `~/env_isaaclab`(Python 3.11)直接可用。
 4. sim 端**完全不用改**——它已經在跑 0.4.3。
 
-**目標**:真機端遷到 0.4.3,退掉 `~/lerobot-pinned` worktree,兩邊共用一個 checkout。
+</details>
 
-**已建立分支**:`n1.7-graphen`(基底 `e670ac5d`,位於 `~/sim2real/lerobot`)。
+**遷移本身做了什麼**(逐項的討論文件已刪除,結論摘要如下):
 
-**遷移清單與逐項討論**:見 [MIGRATION.md](MIGRATION.md)。
+| 項目 | 結果 |
+| --- | --- |
+| 四個 YAML | 改成 0.4.x 的扁平欄位;`use_degrees` 不設(預設 `False` = ±100);<br>相機三台都放 top-level,key 原生無前綴 |
+| `bi_so101_follower` / `bi_so101_leader` | **本 repo 新增**(照抄 `bi_so100_*`,把 SO100 單臂類別換成 SO101)。<br>上游 `bi_so100_*` 包的 SO100 類別會把 `wrist_roll` 寫死成 0–4095。<br>順帶修掉 `lerobot_calibrate.py` 從未 import 任何雙臂類別的 bug。<br>詳見 [lerobot/CALIBRATION.md](../lerobot/CALIBRATION.md) §1.2 |
+| `eval_so101_dual.py` | 改用 `bi_so101_follower` + 扁平欄位;`max_relative_target` 語意<br>從「度」變成正規化單位(數值未動);補修相機 teardown |
+| 沒搬過來的 | `graphen` 分支的 `tools/*.py`、`calibration_check.py`、<br>`dataset_tools.py` 修正、`calibrate_wrist_roll_range` patch |
+| 0.4.3 缺的東西 | **沒有 `lerobot-rollout`**(0.6.x 才有)→ 改用 `lerobot-record --policy.path=...`;<br>`--policy.resize_shape` 不存在,`--policy.crop_ratio` → `--policy.crop_shape=[H,W]`<br>(⚠️ 預設 `(84,84)` 是給 PushT 用的,對 480×640 會裁成一小塊而且不報錯) |
+
+**遺留待辦**:
+- 真機資料要**重收**(慣例從度換成 ±100)。
+- `leader_right` 的 `wrist_roll` range 還是寫死的 `0–4095`(上面驗證步驟 2)。
+  在 ±100 下這是約 5% 的 gain 誤差,不能不管。
 
 **Isaac Sim 6.0 升級**仍然值得做(新功能、效能),但**不再是收斂成單一 repo 的前提**,
 降級為獨立的、非阻塞的任務。升級時仍要注意:USD/物理行為跨大版本可能有差異,
@@ -316,19 +346,15 @@ Phase 6 的 sim eval 基準線(50%)要重跑確認,不能直接沿用。
 
 ## 風險預警
 
-- **⚠️ sim 與真機資料集用了不同的正規化慣例(Phase 8 co-training 直接相關)**
+- **⚠️ 舊的真機資料集是「度」,不能跟新資料混用**
 
-  | | 用的 LeRobot | `use_degrees` 預設 | 5 個身體關節 | gripper |
-  | --- | --- | --- | --- | --- |
-  | sim | `~/lerobot-pinned` v0.4.3 | **`False`** | `RANGE_M100_100`(±100,會 clamp) | `RANGE_0_100` |
-  | 真機 | `~/sim2real/lerobot` v0.6.1 | **`True`** | `DEGREES`(度,**不 clamp**) | `RANGE_0_100` |
+  sim/真機的正規化慣例分歧已經**在遷移中消掉了** —— 兩邊現在都是
+  `RANGE_M100_100`(±100),`utils/lerobot_interface.py` 寫死的 `(raw+100)/200` 也對得上,
+  co-train 掛同一個 `embodiment_tag` 不再有單位問題。
 
-  workshop 建 `SO101LeaderConfig(port=..., id=...)` 時沒傳 `use_degrees`,
-  `utils/lerobot_interface.py` 也寫死 `(raw+100)/200` 的假設 → sim 端確定是 ±100。
-  真機資料集 `bimanual-so101-pickvials-real-15fps` 的 stats 實測 `wrist_roll`
-  跑到 **-163.9**,超出 ±100 → 確定是 DEGREES(RANGE_M100_100 會被 clamp 在 ±100)。
-
-  兩者的換算是 `度 = v × span × 360 / (2×4095×100)`,**比例隨每個關節的 span 不同**:
+  但**遷移前收的真機資料集是 DEGREES 錄的**
+  (`bimanual-so101-pickvials-real-15fps` 的 stats 實測 `wrist_roll` 到 **-163.9**,
+  超出 ±100 就是證據)。換算比例**隨每個關節的 span 不同**:
 
   ```
   shoulder_pan   span 2788  x1.225      elbow_flex   span 2237  x0.983
@@ -336,64 +362,34 @@ Phase 6 的 sim eval 基準線(50%)要重跑確認,不能直接沿用。
   wrist_roll     span 3906  x1.717  ← 差最多      gripper 兩邊相同 ✅
   ```
 
-  也就是同一個物理姿態,sim 記 `+80`、真機記 `+137`(wrist_roll)。
-  gripper 兩邊都是 `RANGE_0_100`,沒問題。
+  同一個物理姿態,新資料記 `+80`、舊資料記 `+137`(wrist_roll)。
+  **所以舊真機資料要重收**,不要跟新資料混在同一個 tag 下訓練
+  (`ShardedMixtureDataset._merge_statistics()` 只在同 tag 內取包絡,
+  數值大的那份會決定包絡,另一份被壓縮到中間一小段;
+  且對重複 tag 只印一行 warning `... new stats DISCARDED`,不會報錯)。
 
-  **單獨 fine-tune 沒問題,co-training 才有問題。** 已查證 GR00T 的行為:
+  > 補充(為什麼 ±100 本身沒問題):GR00T 的 `StateActionProcessor` 對 state/action
+  > 做 min-max 正規化到 [-1,1],統計量**以 `embodiment_tag` 為 key**、由你自己的
+  > dataset 算出來,所以 ±100 與度之間的 affine 差會**完全抵消**。
+  > 唯一對單位敏感的是 `sin_cos_embedding_keys`,而
+  > `examples/SO101_bimanual/so101_bimanual_config.py` 沒有啟用
+  > (`apply_sincos_state_encoding` 預設也是 `False`)。
+  > GR00T 全套程式碼與文件**從沒要求過 degrees**;提到單位的地方都指向 radians,
+  > LIBERO 的 action 更是 `Box(low=-1, high=1)` 的 delta EEF,連物理單位都不是。
+  > 真正的鐵律只有一條:**部署要跟收資料時同一套單位**。
 
-  - `StateActionProcessor` 對 state/action 做 **min-max 正規化到 [-1,1]**,
-    統計量(`min`/`max`,或 `use_percentiles=True` 時的 `q01`/`q99`)
-    **以 `embodiment_tag` 為 key**,由你自己的 dataset 算出來
-    (`gr00t/data/stats.py`、`gr00t/data/state_action/state_action_processor.py`)。
-  - ±100 與「度」之間是**純線性(affine)換算**,min-max 正規化會**完全抵消**它。
-  - 唯一對單位敏感的是 `sin_cos_embedding_keys`(官方 `data_config.md`:
-    「Best for dimensions that are in radians... If not specified, min-max
-    normalization is used」)。`examples/SO101_bimanual/so101_bimanual_config.py`
-    **沒有**啟用,`apply_sincos_state_encoding` 預設也是 `False`。
-  - 已驗證真機資料**全部落在校準範圍內**(最接近的是 elbow_flex 96.6 vs 上限 98.3),
-    所以換成 ±100 編碼也不會被 clamp → 沒有資訊損失。
+- **⚠️ `leader_right` 的 `wrist_roll` 沒有被掃過(既有資料,尚未修)**
 
-  → **所以用 ±100 資料 fine-tune 本身不會有問題。**
-  真正的鐵律是**部署要跟收資料時同一套單位** —— `eval_so101_dual.py:180-183`
-  已經明寫 `use_degrees=True`(註解:「to match how the dataset was recorded」),
-  真機這條迴路是自洽的。
+  它的 range 是寫死的 `0–4095`,另外三支是掃出來的 3873–3910。
+  **在 ±100 下這比以前嚴重**:舊版 DEGREES 尺度固定,寫死只造成零點偏移;
+  現在 span **就是**尺度,寫死 4095 等於該關節整條軸 gain 錯掉約 5%
+  —— 實際後果是那一軸兩端各約 5% 的行程 teleop 時碰不到。
 
-  順帶:GR00T 全套程式碼與文件**從沒要求過 degrees**。唯一提到單位的地方都指向
-  **radians**(`policy.md:174`「joint positions in radians」;`data_config.md:109`
-  sin/cos 編碼「Best for dimensions that are in radians」),而唯一啟用
-  `sin_cos_embedding_keys` 的 embodiment 是 `robocasa_gr1_tabletop`。
-  LIBERO 的 action 更是全部 `Box(low=-1, high=1)` 的 delta EEF,連物理單位都不是。
-
-  **真正的風險**:sim 與真機兩份 dataset 若掛在**同一個 `embodiment_tag`**
-  (目前兩邊都是 `NEW_EMBODIMENT`),它們會**共用同一組統計量**,
-  affine 差就不再抵消 —— 同一個物理動作在 wrist_roll 上會差 1.717 倍,
-  在 [-1,1] 空間裡落到不同區段。GR00T 原始碼對這種情況只會印一行
-  warning(`Statistics for embodiment ... already present; new stats DISCARDED`),
-  不會報錯。
-
-  **已查證:GR00T 的 mixture dataset 支援一次訓練掛多個 tag。**
-  `ShardedMixtureDataset._merge_statistics()` 先用 `embodiment_tag` 分組
-  (`all_stats_by_emb`),**只在同組內**合併統計量。合併方式是取包絡:
-  `min=np.min(min_list)`、`max=np.max(max_list)`、`q01=np.min(q01_list)`、
-  `q99=np.max(q99_list)` —— 所以同 tag 混單位時,數值範圍大的那份(度)會決定包絡,
-  ±100 那份會被壓縮到中間一小段。不同 tag 則各自獨立,不受影響。
-
-  **co-training 前三選一**:① 兩份資料用不同的 `embodiment_tag`(不用重收);
-  ② sim 端改 `use_degrees=True`;③ 真機端改 `use_degrees: false`。
-  **若兩邊資料都要重收,建議 ②**(理由見下)。
-
-- **若採用 ②(統一成 degrees),要注意單位對齊 ≠ 物理對齊**
-
-  兩種慣例的**物理錨點不同**:sim 的 ±100 錨在 `SO101_USD_MAPPING` 的 USD joint
-  limit,真機的度錨在**校準硬限位的中點**。把 sim 改成度之後,
-  `utils/lerobot_interface.py` 的 `(raw+100)/200 → [joint_min, joint_max]` 映射
-  要重新設計成「度 → USD 關節角」,而這只有在**校準中點恰好等於 USD 零位**時才成立。
-  這是 Phase 7 的真機對齊工作,不是單純換單位 —— 沒做的話只是把一種錯配換成另一種。
-
-  好消息:要改的兩處(`lerobot_interface.py:114` 的 `SO101LeaderConfig`、
-  以及 `:140-167` 的兩個映射函式)**都在 workshop repo**,不在 `~/lerobot-pinned`;
-  且 `use_degrees` 在 pinned v0.4.3 本來就是支援的欄位(只是預設 `False`),
-  所以不需要動 pinned repo。
+  **成因已經修掉了**:0.4.3 上游只有 `bi_so100_*`,它包的是 SO100 單臂類別
+  (把 `wrist_roll` 當 full-turn 馬達)。現在 repo 自己加了 `bi_so101_follower` /
+  `bi_so101_leader`(包 SO101,六個關節全掃),四個 YAML 也都改指過去了。
+  **但那支手臂的既有校準檔還是舊的**,要在重收資料前補校一次
+  —— 指令見 [lerobot/CALIBRATION.md](../lerobot/CALIBRATION.md) §1.2。
 
 - **真機 eval 是自訂工程**:12 維 adapter + episode/成功率統計 + 安全機制都要自己補
 - **收 demo 難度高**:雙手同時操作要練習,初期廢片多 → 預留時間

@@ -35,23 +35,25 @@ uv pip install --python ~/env_isaaclab/bin/python \
     -e source/isaaclab -e source/isaaclab_tasks -e source/isaaclab_rl -e source/isaaclab_assets
 ```
 
-## Step 3 — LeRobot, pinned to `e670ac5d` (v0.4.3)
+## Step 3 — LeRobot, branch `n1.7-graphen` (v0.4.3, base `e670ac5d`)
 
-Newer LeRobot needs Python 3.12 (PEP 695 syntax), so the sim env stays on v0.4.3. Real robot keeps
-the newer one — datasets (`v3.0`) and calibration files are compatible both ways.
+**One checkout, one venv — sim and real robot share both.** v0.4.3 requires only Python 3.10+, so
+it runs in Isaac Sim's 3.11 env; and its `use_degrees=False` default (±100) matches what NVIDIA's
+GR00T reference pipeline pins. The old `~/lerobot-pinned` worktree is gone — do not recreate it.
 
 ```bash
-# worktree off the existing fork — shares the object store, ~11 MB
 cd ~/sim2real/lerobot
-git worktree add -b sim-pinned ~/lerobot-pinned e670ac5daf9b76
+git checkout n1.7-graphen
 
-uv pip install --python ~/env_isaaclab/bin/python --no-deps -e ~/lerobot-pinned
+uv pip install --python ~/env_isaaclab/bin/python --no-deps -e ~/sim2real/lerobot
 ```
 
-No fork checked out? `git clone https://github.com/maxshen1212/lerobot.git ~/lerobot-pinned && cd ~/lerobot-pinned && git checkout -b sim-pinned e670ac5daf9b76`
+No fork checked out? `git clone https://github.com/maxshen1212/lerobot.git ~/sim2real/lerobot && cd ~/sim2real/lerobot && git checkout n1.7-graphen`
 
 - `--no-deps` keeps LeRobot from moving Isaac's `torch` / `numpy`.
-- Editable install → don't move or delete `~/lerobot-pinned`. Remove with `git worktree remove`, not `rm -rf`.
+- Editable install → don't move or delete `~/sim2real/lerobot`.
+- **Do not create a `.venv` inside `~/sim2real/lerobot`** (i.e. no `uv run` in there) — the real-robot
+  commands are meant to run in `~/env_isaaclab` too. See [ROADMAP.md](ROADMAP.md) (technical debt).
 
 ## Step 4 — Dependencies
 
@@ -76,11 +78,15 @@ uv pip install --python ~/env_isaaclab/bin/python --no-deps "rerun-sdk>=0.24.0,<
 
 # ZMQ client for the GR00T server
 uv pip install --python ~/env_isaaclab/bin/python pyzmq
+
+# RealSense backend — needed for the REAL robot (lerobot-record / lerobot-teleoperate with cameras)
+uv pip install --python ~/env_isaaclab/bin/python pyrealsense2
 ```
 
 - `numpy` / `torch` pinned so the resolver can't swap out Isaac's versions.
 - `feetech-servo-sdk` is a LeRobot *extra*, so Step 3's `--no-deps` skips it — but `so101_leader` /
   `so101_follower` need it.
+- `pyrealsense2` has no dependencies of its own, so it can't disturb Isaac's pins.
 
 ## Step 5 — Workshop package
 
@@ -115,6 +121,18 @@ print('lerobot OK')"
 
 python -c "from sim_to_real_so101.utils.lerobot_interface import LeRobotSO101Interface; print('bridge OK')"
 
+# real-robot side lives in this same venv now — these must import too
+python -c "
+import pyrealsense2
+from lerobot.cameras.realsense import RealSenseCameraConfig
+from lerobot.robots.bi_so101_follower import BiSO101Follower, BiSO101FollowerConfig
+from lerobot.teleoperators.bi_so101_leader import BiSO101Leader, BiSO101LeaderConfig
+from lerobot.scripts.lerobot_record import RecordConfig, DatasetRecordConfig
+from lerobot.scripts.lerobot_calibrate import CalibrateConfig
+print('real-robot OK')"
+
+lerobot-calibrate --help >/dev/null && echo "console scripts OK"
+
 list_envs                                          # 12 envs; 6 Teleop- (single) + 6 Dual- (bimanual)
 zero_agent --task Lerobot-So101-Dual-Vials-To-Rack # scene loads, no hardware needed
 ```
@@ -133,7 +151,7 @@ uv pip sync --python ~/env_isaaclab/bin/python \
 ```
 
 It carries its own `--extra-index-url` lines for `pypi.nvidia.com` and `download.pytorch.org/whl/cu128`.
-Not covered: the venv must be Python 3.11, and `~/IsaacLab` / `~/lerobot-pinned` / this repo must exist.
+Not covered: the venv must be Python 3.11, and `~/IsaacLab` / `~/sim2real/lerobot` / this repo must exist.
 
 Regenerate after intentional changes with `uv pip freeze --python ~/env_isaaclab/bin/python`, then
 re-add the two `--extra-index-url` lines.
@@ -172,8 +190,7 @@ dataset cleanup, GR00T eval): [run_cheatsheet.md](run_cheatsheet.md).
 | --------------------- | ---------------------------------------------------------------- |
 | venv                  | `~/env_isaaclab` (Python 3.11, Isaac Sim installed inside)        |
 | Isaac Lab             | `~/IsaacLab`                                                      |
-| LeRobot — sim         | `~/lerobot-pinned` — worktree, branch `sim-pinned` @ `e670ac5d`   |
-| LeRobot — real        | `~/sim2real/lerobot` — branch `graphen`                           |
+| LeRobot — sim + real  | `~/sim2real/lerobot` — branch `n1.7-graphen` (v0.4.3, base `e670ac5d`) |
 | Workshop source       | `~/sim2real/Sim-to-Real-SO-101-Workshop/source/sim_to_real_so101` |
 | Lock file             | `~/sim2real/Sim-to-Real-SO-101-Workshop/requirements-isaac.lock`  |
 | Datasets              | `~/sim2real/Sim-to-Real-SO-101-Workshop/datasets`                 |

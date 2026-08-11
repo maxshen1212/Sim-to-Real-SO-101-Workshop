@@ -147,11 +147,22 @@ def main():
     recording_mode = all([args_cli.repo_id, args_cli.repo_root, args_cli.task_name])
     recorder = None
     if recording_mode:
+        # fps 從 env 推導，不要寫死。錄製迴圈是「每個 env step 推一格」，所以資料集的
+        # fps 標籤只有等於 env 控制率才是對的；寫死 30 而 env 跑 60 Hz 的話，時間戳會
+        # 把 9.5 秒的模擬標成 19 秒，之後 GR00T eval 照資料集 fps 送 action 就會差一倍。
+        # 目前 = 1/(sim.dt 1/120 x decimation 4) = 30 Hz，和真機 RealSense 的 30 fps 一致。
+        fps = round(1.0 / env.unwrapped.step_dt)
+        if abs(fps * env.unwrapped.step_dt - 1.0) > 1e-6:
+            raise ValueError(
+                f"env 控制率 {1.0 / env.unwrapped.step_dt:.3f} Hz 不是整數，無法當資料集 fps。"
+                "請調整 sim.dt / decimation 讓 1/(sim.dt * decimation) 為整數。"
+            )
+        print(f"[INFO]: recording at {fps} fps (= env control rate)")
         recorder = LeRobotRecorder(
             task_name=args_cli.task_name,
             repo_id=args_cli.repo_id,
             dataset_root=args_cli.repo_root,
-            fps=30,
+            fps=fps,
             device=env.unwrapped.device,
             cameras=cameras,
             save_mp4=False,

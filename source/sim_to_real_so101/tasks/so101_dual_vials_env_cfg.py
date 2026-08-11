@@ -516,19 +516,23 @@ class SO101DualVialsTerminationsCfg:
 # 保證生效、不依賴 configclass 對「無標註覆寫成 None」的細節。
 # (要量「數量魯棒性」把下面那行 reset_hide_vials = None 註解掉即可。)
 # episode 超時上限。Isaac Lab 的欄位單位是「秒」，而 max_episode_length(步) =
-# episode_length_s / (sim.dt * decimation) = episode_length_s * 60。真正該想的單位是
-# env step，所以這裡先定步數再換算成秒，不要再寫成裸的 `x / 60` 讓人誤讀成分鐘。
+# episode_length_s / (sim.dt * decimation) = episode_length_s * 30。真正該想的單位是
+# env step，所以這裡先定步數再換算成秒，不要再寫成裸的 `x / 30` 讓人誤讀成分鐘。
+# ⚠️ 那個 30 = 1/(sim.dt * decimation)，綁 so101_dual_env_cfg 的 decimation=4。
+# 兩邊要一起改，否則 episode 長度會悄悄縮一半/長一倍。
 #
 # 但預算真正的單位是「policy 動作數」，不是 env step：eval 會把每個預測動作撐住
-# --steps_per_action 個 env step（見 scripts/lerobot_eval_dual.py，理由是訓練資料是
-# 降採樣過的 10 fps，一個 action 不等於一個 env step），所以
+# --steps_per_action 個 env step（見 scripts/lerobot_eval_dual.py，理由是訓練資料
+# 可能是降採樣過的，一個 action 不等於一個 env step），所以
 #     policy 動作數 = EVAL_EPISODE_STEPS / steps_per_action
-# sim 示範平均 332 格/集（86,442 frames / 260 episodes，= 996 env steps）。預設
-# steps_per_action=3 時 5000 步 = 1666 個動作 ≈ 示範的 5 倍餘裕（放不完就走 time_out）。
+# 預設 steps_per_action=3 時 1700 步 = 566 個動作。這個「動作數」預算不受
+# decimation 影響，改 decimation 只改它對應多少 sim 秒數（現在 1700 步 = 56.7 s）。
 # ⚠️ 改 --steps_per_action 就要一起改這裡，否則餘裕倍數會跟著跑掉。
 # 想更寬鬆就調大、想 eval 快就調小（失敗的 episode 會一直跑到用完才結束）。
+# ⚠️ 舊的餘裕倍數是對照 2026-08-10 前那批已作廢的示範資料算的（平均 332 格/集）。
+# 新資料收完後要重算：用新資料集的平均格數 × 想要的倍數 × steps_per_action。
 EVAL_EPISODE_STEPS = 1700
-EVAL_EPISODE_LENGTH_S = EVAL_EPISODE_STEPS / 60
+EVAL_EPISODE_LENGTH_S = EVAL_EPISODE_STEPS / 30
 
 
 # eval 起始姿態（弧度，SO101_JOINTS 順序：Rotation, Pitch, Elbow, Wrist_Pitch, Wrist_Roll, Jaw）。

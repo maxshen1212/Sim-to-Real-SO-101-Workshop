@@ -51,20 +51,18 @@ parser.add_argument(
     type=int,
     default=3,
     help=(
-        "把每個預測動作撐住幾個 env step。env 的控制率是 60 Hz(sim.dt=1/120 x decimation=2)，"
-        "但 checkpoint 吃的是降採樣過的 10 fps 資料集，一個 action 不等於一個 env step。"
-        "要設成建立 sim-10fps 資料集時用的降採樣倍率：sim 錄製是每個 env step 推一格，"
-        "所以一格訓練資料 = 降採樣倍率個 env step。設 1 會讓手臂快 3 倍——"
-        "就是真機那邊抓到的同一個錯。"
-        "預設 3 已驗證：ChihHanShen/bimanual-so101-pickvials-sim 是 260 集 / 259,079 格，"
-        "-sim-10fps 是同樣 260 集 / 86,442 格，比值 2.997 = 每 3 格留 1 格。"
-        "重建資料集換了倍率就要改這裡，並一起調 EVAL_EPISODE_STEPS。"
+        "把每個預測動作撐住幾個 env step。env 的控制率是 30 Hz(sim.dt=1/120 x decimation=4)，"
+        "等於 sim 錄製資料集的 fps（錄製是每個 env step 推一格）。"
+        "要設成『訓練資料集相對於錄製資料集的降採樣倍率』：不降採樣直接用 30 fps 資料訓練就設 1，"
+        "降到 10 fps 訓練就設 3。設錯會讓手臂等比例變快或變慢——就是真機那邊抓到的同一個錯。"
+        "⚠️ 預設 3 是沿用 2026-08-10 前那批已作廢資料的 30->10 fps 降採樣。"
+        "新資料收完後，若直接用 30 fps 訓練就要改成 1，並一起調 EVAL_EPISODE_STEPS。"
     ),
 )
 parser.add_argument(
     "--lang_instruction",
     type=str,
-    default="Pick up the vials and place them into the rack",
+    default="Pick up the vial and place it in the rack",
     help="Language instruction for the policy",
 )
 parser.add_argument("--rerun", action="store_true", default=False, help="Enable Rerun visualization")
@@ -170,11 +168,11 @@ def main():
     print(f"[INFO]: Gym action space: {env.action_space}")
     print(f"[INFO]: Click 'R' to reset the world")
 
-    # 把控制頻率印出來對帳。要對齊的是「錄製時一格資料等於幾個 env step」，不是資料集標的
-    # fps：sim 錄製是每個 env step 推一格（見 lerobot_agent_dual.py），標籤卻寫 30 fps，
-    # 所以 sim 資料集的 fps 標籤本來就不等於 sim 時間。steps_per_action 要設成建立
-    # bimanual-so101-pickvials-sim-10fps 時用的降採樣倍率。
-    # 附帶結果：倍率 3 → policy 在 sim time 是 20 Hz（不是 10 Hz），這是正常的。
+    # 把控制頻率印出來對帳。sim 錄製是每個 env step 推一格（見 lerobot_agent_dual.py），
+    # 而 recorder 的 fps 現在也是從 env.step_dt 推導的，所以 env 控制率 == 錄製資料集 fps
+    # == sim 時間，三者已經對齊（decimation=4 之前不是，標籤 30 而 env 跑 60）。
+    # steps_per_action 只需反映「訓練資料集 vs 錄製資料集」的降採樣倍率：
+    # 直接用 30 fps 訓練 → 1（policy 30 Hz）；降到 10 fps 訓練 → 3（policy 10 Hz）。
     control_hz = 1.0 / env.unwrapped.step_dt
     policy_hz = control_hz / args_cli.steps_per_action
     max_actions = env.unwrapped.max_episode_length // args_cli.steps_per_action
@@ -285,8 +283,8 @@ def main():
                 )
 
             # 同一個動作撐 steps_per_action 個 env step。sim 裡沒有真機 client 的 sleep 可用，
-            # 這就是「control rate = 訓練資料集 fps」在 sim 的等價做法：env 是 60 Hz，資料是
-            # 10 fps，一個 action 送一步會讓手臂比訓練資料快 steps_per_action 倍。
+            # 這就是「control rate = 訓練資料集 fps」在 sim 的等價做法：env 是 30 Hz，若訓練
+            # 資料被降到 10 fps，一個 action 只送一步會讓手臂快 steps_per_action 倍。
             is_terminated = False
             is_truncated = False
             for _ in range(steps_per_action):

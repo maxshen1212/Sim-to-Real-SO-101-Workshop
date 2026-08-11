@@ -195,14 +195,21 @@ class SO101DualTeleopEnvCfg(ManagerBasedRLEnvCfg):
 
     def __post_init__(self) -> None:
         """Post initialization."""
-        self.decimation = 2
+        # decimation=4：物理跑 4 步，policy 才輸出一次動作。
+        # 等效控制頻率 = 120 Hz / 4 = 30 Hz —— 這個 30 是刻意的，不是隨手選的：
+        # 錄製時每個 env step 推一格資料（scripts/lerobot_agent_dual.py），所以
+        # 「env 控制率」就是 sim 資料集的真實 fps。設 30 讓它等於真機 RealSense 的
+        # 30 fps，sim/real co-train 才會在同一個時間基準上。
+        # （單臂那邊仍是 decimation=2 → 60 Hz，沒有動。）
+        # ⚠️ 改這個值會連動 so101_dual_vials_env_cfg.EVAL_EPISODE_LENGTH_S 的換算。
+        self.decimation = 4
         self.episode_length_s = 5
 
         self.scene.num_envs = 1
         # 視角：拉遠一點看得到兩臂（兩臂在 y=±0.15）
         self.viewer.eye = (-0.5, 0.0, 0.4)
         self.viewer.lookat = (0.2, 0.0, 0.1)
-        # 模擬設定（同單臂）
+        # 模擬設定
         self.sim.dt = 1 / 120
         self.sim.render_interval = self.decimation
         self.sim.render.rendering_mode = "quality"

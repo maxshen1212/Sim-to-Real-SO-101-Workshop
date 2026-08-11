@@ -67,7 +67,7 @@ git -C ~/sim2real/lerobot add calibration/ && git -C ~/sim2real/lerobot commit -
 > 逐支跑把暴露窗口從幾分鐘縮到幾十秒。
 >
 > 雙臂 config 仍然可以用來**重用**既有校準（提示時按 ENTER 寫回馬達）：
-> `lerobot-calibrate --config_path=~/sim2real/lerobot/calibration/config/bimanual_so101_follower_config.yaml`
+> `lerobot-calibrate --config_path=$HOME/sim2real/lerobot/calibration/config/bimanual_so101_follower_config.yaml`
 
 已有校準檔時會先問：**ENTER = 把舊檔寫回馬達（不重掃）**，**`c` = 重新校準**。
 
@@ -79,6 +79,23 @@ git -C ~/sim2real/lerobot add calibration/ && git -C ~/sim2real/lerobot commit -
 - **「擺到行程中間」要盡量準。** `homing_offset` 上限是 `±2047`，擺太偏會讓**下次**校準直接 `ValueError`。
 - **夾爪的「開到底 / 閉到底」四支要用同一套定義**，否則左右夾爪尺度不同。
 - **校準時不要拉扯線束** —— 四支共用同一個 USB hub，搬動一支很容易讓旁邊那支掉線。
+- **`wrist_roll` 不要多轉** —— 見下方的繞回陷阱。
+
+> ### ⚠️ `wrist_roll` 的繞回陷阱
+>
+> 掃描讀的是 `Present_Position`（`Actual − Homing_Offset`），那是 **12-bit、會繞回**的值
+> （[motors_bus.py:741-749](../lerobot/src/lerobot/motors/motors_bus.py#L741-L749)）。
+> `set_half_turn_homings()` 把起始位置設成正中的 **2047**，所以距離繞回點兩邊各只有 ~2047 counts。
+>
+> 而 `wrist_roll` 實測掃出來的 span 是 **3845 / 3869 / 3920**（半幅 ~1925-1960）——
+> **距離繞回只剩 90~120 counts，約 8~10°**。多轉那一點點，讀值就從 4095 跳回 0，
+> min/max 直接變成 `0` 和 `4095`。
+>
+> **這個結果跟「用錯型別走到 SO100 硬編碼路徑」產生的檔案一模一樣，事後從檔案分不出來。**
+> 掃描時要看 live 表格：`wrist_roll` 的 MIN 掉到接近 0、或 MAX 接近 4095，就是快繞回了 —— 停手重來。
+>
+> 另一個分辨點在提示字串:走到 SO100 路徑會寫
+> 「Move all joints **except 'wrist_roll'**」，正確的 SO101 路徑寫「Move all joints sequentially」。
 
 ---
 

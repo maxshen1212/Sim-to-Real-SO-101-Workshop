@@ -3,10 +3,11 @@
 **目標**:單臂模擬環境改雙臂 + RealSense D435i ×3,雙臂遙操作收資料 → 訓練 GR00T →
 DR + 真實資料 co-training → sim-to-real。
 
-**現在位置**:Phase 8。sim eval(50%,基準線)、真機 50 集、co-training checkpoint 都已完成,
-**唯一還沒打通的是真機雙臂 real eval**。
+**現在位置**:**回到收資料**。2026-08-10 全部重新校準四支手臂後,
+**sim 與真機的舊資料集全部作廢、已刪除**,兩個 checkpoint 也都是舊資料訓的。
+Phase 8 的真機 eval 管線已經打通(server/client 都驗過),但要等新資料。
 
-最後更新:2026-08-10
+最後更新:2026-08-11
 
 > 這份文件只記**決策與狀態**。指令在 [run_cheatsheet.md](run_cheatsheet.md)(sim + 真機合併)、
 > [install_cheatsheet.md](install_cheatsheet.md)(安裝)、
@@ -24,8 +25,9 @@ DR + 真實資料 co-training → sim-to-real。
 | **架 / 墊** | 中央共用架置於墊子中心 world (0.22, 0);mat x[0.068, 0.372] × y[-0.229, 0.229] |
 | **相機** | 3 台(左腕/右腕/ego 俯視),**只收 RGB** |
 | **ego 相機**(已量測) | world ≈ (-0.23, 0.03, 0.53),俯視約 45°;focal 15.245mm、aperture 20.955×15.716 → **HFOV≈69°**(= D435 color)。相對 LightBox:translate (0, 0.4, 0.5)、euler (45°,0,-90°) |
-| **語言指令** | 單一 embodiment-agnostic 句:`"Pick up the vials and place them into the rack"` |
+| **語言指令** | 單一 embodiment-agnostic 句:`"Pick up the vial and place it in the rack"` |
 | **dataset schema** | 12 維 state/action(`left_*`×6 + `right_*`×6)+ 3 相機(`wrist_left`/`wrist_right`/`center`,480×640)+ fps=30 |
+| **控制率 / fps** | sim env **30 Hz**(`sim.dt=1/120` × `decimation=4`)= 真機 RealSense 30 fps。<br>sim 錄製每個 env step 推一格,recorder 的 fps 由 `env.step_dt` 推導 → 標籤 = sim 時間 = 真機時間 |
 | **關節正規化** | `RANGE_M100_100`(±100),sim / 真機同一套。`use_degrees` 一律不設 |
 | **校正檔** | 統一放 `lerobot/calibration/`(git 追蹤),sim 與真機**讀同一份**,不用 HF cache |
 
@@ -38,11 +40,11 @@ DR + 真實資料 co-training → sim-to-real。
 
 ```
 Phase 1-3   單臂 USD / 雙臂 Isaac Lab 環境 / 三相機        ✅
-Phase 4A/B  雙臂遙操作收資料 + 數量隨機                    ✅  74 集,已上 HF Hub
-Phase 5     Domain Randomization                           ✅  桌面紋理暫由 HDRI 補
-Phase 6     GR00T 訓練(純 sim)+ sim eval                 ✅  成功率 50%(基準線)
-Phase 7     真機對齊 + 收真實資料                          ✅  50 集
-Phase 8     Co-training + 真機 eval                        ← 現在
+Phase 4A/B  雙臂遙操作收資料 + 數量隨機                    ⟳  重收(舊 74 集作廢)  ← 現在
+Phase 5     Domain Randomization                           ✅  環境設定,不受影響
+Phase 6     GR00T 訓練(純 sim)+ sim eval                 ⟳  要用新資料重訓
+Phase 7     真機對齊 + 收真實資料                          ⟳  重收(舊 50 集作廢)  ← 現在
+Phase 8     Co-training + 真機 eval                        管線已通,等新資料
 Phase 9     進階 sim-to-real(Cosmos / SAGE+GapONet)       尚未探索
 
 技術債      收斂成單一 LeRobot repo(n1.7-graphen, v0.4.3)  程式碼✅ / 真機驗證未跑
@@ -97,10 +99,13 @@ server 沿用 sim eval 那顆。理由:**推論路徑與訓練同源**(normaliza
    `processor_config.json`**(`Gr00tPolicy` 走 `AutoProcessor.from_pretrained`),不是
    `experiment_cfg/final_model_config.json`。所以 `left_arm`/`right_arm` 輸出是**相對當前 state 的 delta**、
    兩個 gripper 是絕對值。走 Isaac-GR00T 路線會自動讀,設不錯;**把 delta 當絕對關節角送進真機會暴衝**。
-2. **控制頻率 10 Hz,不是 30 Hz。** 官方一致做法是 **control rate = 訓練資料集 fps**(DROID 寫死 15、
-   SO100 用 1/30),不內插。本專案 checkpoint 吃 10fps 資料集(已查 `meta/info.json`)。
-   錄製 config 的 30 fps 是**擷取**頻率。**用 30 Hz 會快 3 倍。**
+2. **控制頻率 = 訓練資料集 fps,不是錄製 fps。** 官方一致做法(DROID 寫死 15、SO100 用 1/30),
+   不內插。舊 checkpoint 吃 **10 fps** 資料集(已查 `meta/info.json`),所以
+   `eval_so101_dual.py` 的 `fps` 是 10;用 30 會快 3 倍。
    → 16 步 chunk 覆蓋 1.6 秒;實測推論延遲 0.070 s,23 倍餘裕,不會 stop-and-go。
+   **⚠️ 新一輪資料要重新確認這個值**:sim 與真機現在都是 30 fps 錄製,若直接用 30 fps 訓練
+   (不降採樣),`fps` 就要改成 **30**,且 16 步 chunk 只覆蓋 0.53 秒。訓練前先決定降不降採樣,
+   然後同步改 `eval_so101_dual.py` 的 `fps` 與 `lerobot_eval_dual` 的 `--steps_per_action`。
 3. **server 必須跑在 Isaac-GR00T 自己的 `.venv`**(pin `torch==2.9.0`/`transformers==4.57.3`)。
    借用別的 venv = 影像前處理/tokenizer 跟訓練時不同,「推論路徑同源」的選型理由就沒了。
 4. **不要用 workshop 的 `docker/real/scripts/so101_eval.py`** —— 那是**單臂**版(6 維
@@ -134,15 +139,22 @@ cd ~/sim2real/Isaac-GR00T/gr00t/eval/real_robot/SO101_bimanual && python eval_so
   `r` = 只用於操作者/硬體失誤,不進分母。
 - **N=20**(N=10 時 50% 的 95% CI 約 ±31 個百分點,分不出 30% 和 70%)。
 
-**⚠️ 跟 sim 的 50% 對照時三個不對等要註明**:① sim 跑 60 Hz,16 步 chunk 0.27 秒跑完,
-比資料代表的 1.6 秒快 6 倍(physics-time vs data-time 的產物,不該轉移);
+**⚠️ 跟 sim 的 50% 對照時三個不對等要註明**:① 那次 sim eval 的 env 跑 60 Hz
+(`decimation=2`),policy 在 sim time 是 20 Hz,比資料代表的 10 fps 快一倍
+(physics-time vs data-time 的產物,不該轉移);
 ② sim 是 `confirm_steps=25` 自動判定、真機是人判;③ sim 22.5 s vs 真機 90 秒。
 → **50% 是參考點,不是嚴格 baseline。**
+
+> **2026-08-11 起 50% 連「可重跑」都不算了。** `decimation` 已由 2 改為 4
+> (env 60 Hz → 30 Hz,見下方技術債),同一個 checkpoint 現在會以正確的 10 Hz 執行
+> 而不是當初的 20 Hz,數字必然不同。要對照就得用新資料訓練的新 checkpoint 重跑一輪。
 
 ### 剩下的驗證順序
 
 - [x] checkpoint 契約吻合、server 通聯實測(延遲 0.070 s)、12 顆馬達正常、相機 key 無前綴
 - [x] client 環境就緒(`gr00t` 已裝進 `env_isaaclab`,`--help` 實跑通過)
+- [ ] **兩批資料收完後跑 `tools/check_dataset_parity.py`**(sim/real 規格一致 + 值域重疊,
+      見 run_cheatsheet C1.5)。**這是 co-train 的前置閘門** —— 不過就不要開始訓練
 - [ ] **首次帶電**:1 集、`max_relative_target` 全設 0.5、手放電源開關
 - [ ] **全速單集**,跟 `lerobot-replay` 的真人 demo 並排比對速度(驗 10 Hz)
 - [ ] **20 集正式跑**,再換純 sim checkpoint 重跑一輪做對照
@@ -191,34 +203,68 @@ sim + 真機共用。`~/lerobot-pinned` worktree 與 `lerobot/.venv` 都已移�
 
 </details>
 
-**尚未完成 —— 下面六步一步都還沒跑**(需要四支手臂都接上):
+**重收資料前的驗證順序**(需要四支手臂都接上):
 
 ```
-1. lerobot-calibrate 按 ENTER 重用既有校準檔,確認能寫回馬達(四支)
-2. 補校 leader_right 的 wrist_roll(單臂 so101_leader 型別,見 CALIBRATION.md §1 末尾)
-   → 校完 span 應落在 3800-3950,不再是 4095
-3. lerobot-teleoperate → 每個關節推到兩端硬限位,確認 leader/follower 都讀到 ≈ ±100
-4. lerobot-record 錄 1 集 → stats.json 值域在 ±100 內、camera key 無前綴、fps 穩不穩
-5. sim 端不動,確認 lerobot_agent_dual / lerobot_eval_dual 仍正常
-6. 正式重收真機資料
+1. ✅ 重新校準(2026-08-10):follower 左 3920 / 右 3845、leader 左 3869
+2. ⬜ 補跑 leader_right —— wrist_roll 還是寫死的 4095,要用 so101_leader 單臂型別
+   → 校完 span 應落在 3800-3950
+3. ⬜ 四支 commit 成新基準(message 寫上要收的 dataset 名稱)
+4. ⬜ lerobot-teleoperate → 每個關節推到兩端硬限位,確認 leader/follower 都讀到 ≈ ±100
+5. ⬜ lerobot-record 錄 1 集 → stats.json 值域在 ±100 內、camera key 無前綴、fps 穩不穩
+6. ⬜ lerobot_agent_dual 錄 1 集 → 同樣檢查,並確認 lerobot_eval_dual 仍正常
+7. ⬜ 正式重收 sim + 真機資料
 ```
 
 ---
 
 ## 風險預警
 
-- **⚠️ 舊真機資料集是「度」錄的,要重收。** 慣例分歧已在收斂中消掉(兩邊都是 ±100),但遷移前的
-  真機資料是 DEGREES(`...-real-15fps` 的 `wrist_roll` stats 到 **-163.9**,超出 ±100 就是證據)。
-  換算比例**隨每個關節的 span 不同**(`wrist_roll` ×1.717 差最多),同一個物理姿態新資料記 `+80`、
-  舊資料記 `+137`。**不要混在同一個 `embodiment_tag` 下訓練** —— `_merge_statistics()` 只在同 tag 內
-  取包絡,數值大的那份決定包絡、另一份被壓縮,而且只印 warning 不報錯。
+- **⚠️ 2026-08-10 之前的資料全部作廢(已刪除),兩個 checkpoint 也是舊資料訓的。**
+
+  | | 為什麼作廢 |
+  | --- | --- |
+  | 真機資料 | 用 **DEGREES** 錄的(`wrist_roll` stats 到 -163.9,超出 ±100 就是證據),現在是 ±100。<br>換算比例**隨每個關節的 span 不同**(`wrist_roll` ×1.717 差最多)—— 不是換個單位就能轉 |
+  | sim 資料 | `state` 走硬編碼的 `SO101_USD_MAPPING`、與校準無關,**但 `action` 是兩支 leader 的正規化讀值**,<br>綁在舊的 leader 校準上。而那組舊校準**左右對調**,且 `leader_right` 的 `wrist_roll`<br>只掃到 span 947(正常 ~3900)。半份能用的資料留不得 |
+  | 兩個 checkpoint | `pickvials-n1p7-run2`(純 sim)、`run3`(co-train)都是舊資料訓的 |
+
+  **不要把新舊資料混在同一個 `embodiment_tag` 下訓練** —— `_merge_statistics()` 只在同 tag 內取包絡,
+  數值大的那份會決定包絡、另一份被壓縮到中間一小段,而且只印 warning 不報錯。
+
+  > **舊 checkpoint 的 sim eval 50% 已無法重現**(2026-08-11 更新)。sim eval 確實不讀校正檔,
+  > 任務邏輯也沒動,但 `decimation` 已由 2 改為 4(env 60 Hz → 30 Hz,見下一條),
+  > 同一個 checkpoint 現在跑在正確的 10 Hz 而非當初的 20 Hz,數字必然不同。
+  > 只能當「這個任務大致可解」的定性參考。新資料訓出來的模型要自己重新量一次。
 
   > ±100 本身沒問題:GR00T 對 state/action 做 min-max 到 [-1,1],統計量**以 `embodiment_tag` 為 key**、
   > 由自己的 dataset 算出,affine 差會完全抵消。鐵律只有一條:**部署要跟收資料時同一套單位**。
 
-- **⚠️ `leader_right` 的 `wrist_roll` 校準檔還是舊的**(寫死 `0–4095`,另三支是掃出來的 3873–3910)。
-  成因已修(改用 `bi_so101_*`),但那支要補校一次(技術債步驟 2)。在 ±100 下 span 就是尺度,
-  寫死 4095 = 該軸 gain 錯約 5%,實際後果是兩端各約 5% 行程 teleop 碰不到。
+- **⚠️ 2026-08-11:sim env 控制率由 60 Hz 改成 30 Hz(`decimation` 2 → 4)。**
+
+  舊行為:錄製迴圈每個 `env.step()` 推一格,而 `env.step()` 只前進
+  `sim.dt(1/120) × decimation(2) = 1/60` 秒,資料集的 fps 標籤卻寫死 30
+  → **時間戳把 9.5 秒的模擬標成 19 秒**(`info.json` fps、`timestamp = index/30`、
+  ffmpeg `-r 30` 三處都錯同一個方向)。GR00T 部署是「control rate = 訓練資料集 fps」,
+  標籤差一倍,真機速度就差一倍。
+
+  改法:`decimation=4` → env 真的是 30 Hz,和真機 RealSense 一致(co-train 必要);
+  同時 `lerobot_agent_dual` 的 recorder fps 改成從 `env.step_dt` **推導**,
+  兩個數字結構上不可能再分岔。附帶好處:render 負載減半,`sim.dt=1/120` 物理精度保留。
+
+  連動改到的:`EVAL_EPISODE_LENGTH_S = EVAL_EPISODE_STEPS / 30`(原本 `/60`,不改的話
+  episode 長度會腰斬);`lerobot_eval_dual` 的 `--steps_per_action` 語意
+  (現在 = 訓練資料集相對錄製資料集的降採樣倍率:直接用 30 fps 訓練就設 **1**,
+  降到 10 fps 才設 3 —— 預設值仍是 3,新資料訓練前要確認)。
+  `control_hz` 本來就是 `1/env.step_dt` 推導的,不必改。單臂那條線沒有動。
+
+- **⚠️ `leader_right` 的 `wrist_roll` 是 `0`/`4095`**(另三支是 3845 / 3869 / 3920)。
+  **收資料前要補跑這一支。** 在 ±100 下 span 就是尺度,4095 = 該軸 gain 錯約 5%。
+
+  **兩種成因會產生一模一樣的檔案,事後分不出來**:① 型別用到 SO100 那條路徑(寫死 0/4095);
+  ② **掃描時 `wrist_roll` 多轉、讀值繞回** —— `Present_Position` 是 12-bit 會繞回的值,
+  而起始被設在正中 2047,實測 span 3845-3920 表示**距離繞回只剩 8~10°**。
+  重跑時看 live 表格:MIN 接近 0 或 MAX 接近 4095 就是快繞回了。詳見
+  [CALIBRATION.md](CALIBRATION.md) §1 的繞回陷阱。
 
 - **真機 eval 是自訂工程**;**收 demo 難度高**(雙手同時操作要練習,初期廢片多);
   **雙 leader teleop** 的 port 每次插拔會變;**多台 RealSense** 可能撞 USB 頻寬 → 分 controller 或降 fps;
@@ -245,3 +291,8 @@ sim + 真機共用。`~/lerobot-pinned` worktree 與 `lerobot/.venv` 都已移�
   慣例統一成 ±100 → sim/真機分歧消失,但**舊真機資料要重收**。
   `gr00t` client 薄片裝進 `env_isaaclab`,eval 不再需要第三個 venv。
   文件精簡:`CALIBRATION.md` 365→187、`run_cheatsheet.md` 213→165、本檔 440→249 行
+- **2026-08-11** **修掉 sim 資料集 fps 標籤差一倍**:錄製迴圈每個 env step 推一格,而 env 只跑
+  1/60 秒、標籤卻寫死 30 → 時間戳全部長一倍,部署速度會跟著錯。`decimation` 2 → 4
+  (env 30 Hz,對齊真機 RealSense),recorder 的 fps 改為從 `env.step_dt` 推導。
+  連動:`EVAL_EPISODE_LENGTH_S` 換算改 `/30`、`--steps_per_action` 語意更新。
+  **代價:舊 checkpoint 的 sim eval 50% 不再可重現**,只當定性參考

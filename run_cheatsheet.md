@@ -9,6 +9,11 @@
 >
 > **校正檔統一放 `~/sim2real/lerobot/calibration/`**(git 追蹤),sim 與真機讀同一份。
 > 關節正規化是 `RANGE_M100_100`(±100),`use_degrees` 一律不設。
+>
+> ⚠️ **2026-08-10 全部重新校準後,舊的 sim 與真機資料集都已作廢刪除,現在從零重收。**
+> 新舊資料**不可混用**(真機舊資料是「度」;sim 舊資料的 action 綁在舊 leader 校準上),
+> 原因見 [ROADMAP.md](ROADMAP.md) 風險預警。新資料收進兩個**已清空**的 HF repo:
+> `ChihHanShen/bimanual-so101-pickvials-sim` 與 `...-real`。
 
 ---
 
@@ -51,7 +56,9 @@ lerobot-calibrate --teleop.type=so101_leader --teleop.port=/dev/ttyLeaderRight \
   --teleop.id=bimanual_so101_leader_right   --teleop.calibration_dir=$CL
 ```
 
-**每個關節都要推到真正的機械硬限位。** ±100 下 span 直接就是尺度,掃不到底整條軸的 gain 就錯了。
+**每個關節都要推到真正的機械硬限位** —— ±100 下 span 直接就是尺度,掃不到底整條軸的 gain 就錯了。
+**但 `wrist_roll` 不要多轉**:它的讀值是 12-bit 會繞回的,實測距離繞回只剩 8~10°,
+一繞回就變成假的 `0`/`4095`。掃描時盯 live 表格,MIN 接近 0 或 MAX 接近 4095 就停手重來。
 判讀、維修後怎麼比對、跑掉了怎麼救,全在 **[CALIBRATION.md](CALIBRATION.md)**。
 
 > `id` 寫成子臂名字,寫出來就是雙臂類別之後會讀的同一個檔(檔名只由 `id` 決定)。
@@ -89,15 +96,22 @@ lerobot_agent_dual --task Lerobot-So101-Dual-Vials-To-Rack-DR
 
 # 錄製(三個 repo 參數都給才會啟用;-DR 版本每集隨機化外觀+相機+試管數)
 lerobot_agent_dual \
-  --task Lerobot-So101-Dual-Vials-To-Rack \
-  --repo_id  ChihHanShen/bimanual-so101-pickvials \
-  --repo_root $(pwd)/datasets/bimanual-so101-pickvials \
-  --task_name "Pick up the vials and place them into the rack"
+  --task Lerobot-So101-Dual-Vials-To-Rack-DR \
+  --repo_id  ChihHanShen/bimanual-so101-pickvials-sim \
+  --repo_root $(pwd)/datasets/bimanual-so101-pickvials-sim \
+  --task_name "Pick up the vial and place it in the rack"
 ```
 
 port / id / 校正目錄都已是預設值,**不用設環境變數**。要覆寫才用 `--port_left` 等旗標
 (或 `TELEOP_PORT_LEFT` / `TELEOP_ID_LEFT` / `TELEOP_CALIBRATION_DIR`)。
 啟動時會印出實際載入的校正檔路徑;檔案不在會直接停,不會靜靜跳進重新校準。
+
+> **開錄前確認這行**:`[INFO]: recording at 30 fps (= env control rate)`。
+> 這個 fps 是從 `env.step_dt`(= `sim.dt` × `decimation`)推導的,不是寫死的。
+> 印出來不是 30 就表示有人動過 `decimation` —— **先停下來**,不要收:sim 錄製是
+> 每個 env step 推一格,所以這個數字就是資料集的真實 fps,而 GR00T 部署是照
+> 訓練資料集的 fps 送 action,標錯多少倍、真機就快多少倍。
+> (2026-08-11 前這裡是寫死 30、env 卻跑 60 Hz,舊 sim 資料的時間戳全部長一倍。)
 
 錄製鍵盤(焦點要在 Isaac Sim 視窗):
 
@@ -118,11 +132,22 @@ port / id / 校正目錄都已是預設值,**不用設環境變數**。要覆寫
 
 ```bash
 # 純遙操作,不錄
-lerobot-teleoperate --config_path=~/sim2real/lerobot/calibration/config/bimanual_so101_teleoperate_config.yaml
+lerobot-teleoperate --config_path=$HOME/sim2real/lerobot/calibration/config/bimanual_so101_teleoperate_config.yaml
 
-# 錄製
-lerobot-record --config_path=~/sim2real/lerobot/calibration/config/bimanual_so101_record_config.yaml
+# 錄製 —— 這批資料集的「第一次」要加 --resume=false(建立資料集)
+lerobot-record --config_path=$HOME/sim2real/lerobot/calibration/config/bimanual_so101_record_config.yaml \
+  --resume=false
+
+# 之後每次接續錄(append 進既有資料集)
+lerobot-record --config_path=$HOME/sim2real/lerobot/calibration/config/bimanual_so101_record_config.yaml
 ```
+
+> **第一次不加 `--resume=false` 會噴一個看不出原因的錯。** config 裡 `resume: true`(常態),
+> 但資料集還不存在時它會走 load:本地沒有 `meta/info.json` → 回退去 Hub 抓 →
+> 空的 HF repo 沒有 codebase version tag → `RevisionNotFoundError: Your dataset must be
+> tagged with a codebase version`。**跟 Hub 完全無關,就是本地還沒建而已。**
+> 反過來誤加也不危險:`create()` 是 `mkdir(exist_ok=False)`,資料夾在就直接
+> `FileExistsError`,不會覆蓋。
 
 錄製鍵盤(pynput 全域監聽,需有畫面;無頭環境停用)—— **跟 sim 的按鍵不一樣**:
 
@@ -141,11 +166,11 @@ lerobot-record --config_path=~/sim2real/lerobot/calibration/config/bimanual_so10
 ```bash
 lerobot-replay \
   --robot.type=bi_so101_follower --robot.id=bimanual_so101_follower \
-  --robot.calibration_dir=~/sim2real/lerobot/calibration/bimanual_follower \
+  --robot.calibration_dir=$HOME/sim2real/lerobot/calibration/bimanual_follower \
   --robot.left_arm_port=/dev/ttyFollowerLeft \
   --robot.right_arm_port=/dev/ttyFollowerRight \
   --dataset.repo_id=ChihHanShen/bimanual-so101-pickvials-real \
-  --dataset.root=~/sim2real/lerobot/datasets/bimanual-so101-pickvials-real \
+  --dataset.root=$HOME/sim2real/lerobot/datasets/bimanual-so101-pickvials-real \
   --dataset.episode=0 --dataset.fps=30
 ```
 
@@ -158,25 +183,63 @@ lerobot-replay \
 ### C1 檢查 schema
 
 ```bash
-DS=$(pwd)/datasets/bimanual-so101-pickvials
+DS=$(pwd)/datasets/bimanual-so101-pickvials-sim
 ls $DS && cat $DS/meta/info.json | head
 
 python - <<PY
 from lerobot.datasets.lerobot_dataset import LeRobotDataset
-ds = LeRobotDataset(repo_id="ChihHanShen/bimanual-so101-pickvials", root="$DS")
+ds = LeRobotDataset(repo_id="ChihHanShen/bimanual-so101-pickvials-sim", root="$DS")
 print("episodes:", ds.meta.total_episodes, "frames:", ds.meta.total_frames, "fps:", ds.meta.fps)
 for k, v in ds.meta.features.items():
     print(k, v.get("shape"), v.get("names"))
 PY
 ```
 
-驗三點:`observation.state` / `action` 形狀 **(12,)** 且 names 是 6 個 `left_*` + 6 個 `right_*`;
-有 **3 個** `observation.images.*`(`wrist_left`/`wrist_right`/`center`,480×640);`fps` 與集數正確。
+驗四點:`observation.state` / `action` 形狀 **(12,)** 且 names 是 6 個 `left_*` + 6 個 `right_*`;
+有 **3 個** `observation.images.*`(`wrist_left`/`wrist_right`/`center`,**480×640**);集數正確;
+**`fps` = 30**,sim 與真機都是 —— 兩邊要相同才能 co-train,而且部署速度直接綁這個值。
+
+> sim 那邊還要順手對一下**時間**:`total_frames / fps` 應該等於你實際錄的模擬秒數。
+> 例如 572 格 ÷ 30 ≈ 19 s。差一倍就是 `decimation` 又跟 recorder 的 fps 分岔了。
 
 視覺化(影片 + 12 維曲線同步播放,Rerun 視窗):
 
 ```bash
 lerobot-dataset-viz --repo-id <id> --root <path> --episode-index 47
+```
+
+### C1.5 sim ↔ real 規格一致性(co-train 前必跑)
+
+上面那段只看單一資料集。**兩批要一起訓練之前**,用這支把「規格一致」和「值域對得上」
+一次驗完 —— schema 差一個欄位名、fps 差一倍、單位差一個 scale,GR00T 都不會報錯,只會學壞:
+
+```bash
+python tools/check_dataset_parity.py \
+  --sim  ~/sim2real/lerobot/datasets/bimanual-so101-pickvials-sim \
+  --real ~/sim2real/lerobot/datasets/bimanual-so101-pickvials-real
+```
+
+只收好一批也能跑(給一個旗標就好),會做完該批的自檢再跳過比對。
+其他旗標:`--quick` 不讀 parquet(只信 `meta/stats.json`,快但較粗)、
+`--strict` 把 WARN 也當失敗、`--iou-warn` 調值域重疊的告警門檻。離開碼 0 = 全過。
+
+它檢查四件事:
+
+| 區塊 | 內容 |
+| --- | --- |
+| 1. 單批自檢 | fps=30、`(12,)` float32、names 順序含 `.pos`、三台相機 480×640 video、`video.fps` 對得上、任務字串、**手臂 ±100 / 夾爪 0~100**、有無關節整批沒動、timestamp 自洽 |
+| 2. 規格比對 | 欄位集合、names 與順序、dtype、shape、相機 key、fps、任務字串 —— **硬性相等** |
+| 3. 值域比對 | 12 個關節逐一列 sim/real 的 min/max、重疊度、span 比。**完全不相交 = FAIL**(單位或校準錯);重疊少 = WARN。另外比對每格位移量,抓「時間基準差一倍」 |
+| 4. modality | 12 維切法 `0:5 / 5:6 / 6:11 / 11:12` 與三個 video key 對得上 checkpoint 的 `modality.json` |
+
+> **值域「一樣」的正確定義**:兩批是不同軌跡,min/max 本來就不會相等。要驗的是
+> **分佈重疊**。完全不相交才是真問題 —— 那代表兩邊根本不在同一個座標系,
+> 依序查:單位(DEGREES vs ±100)→ 左右臂有沒有對調 → 校準檔是不是同一份。
+
+檢查器自己也有測試(建合成資料集 + 注入十種故障,不需硬體):
+
+```bash
+python tools/test_check_dataset_parity.py     # 15 個情境,約 1 分鐘
 ```
 
 ### C2 刪掉品質不好的 episode
@@ -210,8 +273,8 @@ hf download ChihHanShen/bimanual-so101-pickvials-real \
   --repo-type dataset --local-dir ~/sim2real/lerobot/datasets/bimanual-so101-pickvials-real
 
 # 上傳(注意是連字號旗標;--root 一定要帶,否則會去 HF cache 找)
-lerobot_push_dataset --repo-id ChihHanShen/bimanual-so101-pickvials \
-  --root $(pwd)/datasets/bimanual-so101-pickvials       # 私有加 --private
+lerobot_push_dataset --repo-id ChihHanShen/bimanual-so101-pickvials-sim \
+  --root $(pwd)/datasets/bimanual-so101-pickvials-sim       # 私有加 --private
 ```
 
 `push_to_hub()` 是「覆蓋 + 新增」,**不會刪掉 Hub 上本機已無的檔**。只加集時完全正確;

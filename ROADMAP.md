@@ -8,10 +8,9 @@ DR + 真實資料 co-training → sim-to-real。
 
 最後更新:2026-08-10
 
-> 這份文件只記**決策與狀態**。指令在:[run_cheatsheet.md](run_cheatsheet.md)(sim)、
+> 這份文件只記**決策與狀態**。指令在 [run_cheatsheet.md](run_cheatsheet.md)(sim + 真機合併)、
 > [install_cheatsheet.md](install_cheatsheet.md)(安裝)、
-> [lerobot/run_cheatsheet.md](../lerobot/run_cheatsheet.md) 與
-> [lerobot/CALIBRATION.md](../lerobot/CALIBRATION.md)(真機)。
+> [CALIBRATION.md](CALIBRATION.md)(校準判讀)。
 
 ---
 
@@ -183,7 +182,7 @@ sim + 真機共用。`~/lerobot-pinned` worktree 與 `lerobot/.venv` 都已移�
 
 **做了什麼**:四個 YAML 改成 0.4.x 扁平欄位;新增 `bi_so101_follower`/`bi_so101_leader`
 (上游 `bi_so100_*` 包的 SO100 類別會把 `wrist_roll` 寫死成 0–4095,見
-[CALIBRATION.md](../lerobot/CALIBRATION.md) §0 規則②),順帶修掉 `lerobot_calibrate.py`
+[CALIBRATION.md](CALIBRATION.md) §0 規則②),順帶修掉 `lerobot_calibrate.py`
 從未 import 任何雙臂類別的 bug;`eval_so101_dual.py` 改用新型別、補修相機 teardown。
 
 **0.4.3 缺的東西**:沒有 `lerobot-rollout`(→ `lerobot-record --policy.path=...`);

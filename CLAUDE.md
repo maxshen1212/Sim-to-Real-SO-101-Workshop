@@ -13,7 +13,7 @@ There is an active fork goal: converting this single-arm setup into a **bimanual
 This package is **not runnable standalone** — it must be installed into an Isaac Sim + Isaac Lab Python environment (Python 3.11). Two supported setups:
 
 - **Docker** (per [README.md](README.md) / [docker/README.md](docker/README.md)): build `teleop-docker` (`docker/sim/Dockerfile`) for sim/teleop, and `real-robot` (`docker/real/build.sh <ada|blackwell>`) for the real robot + GR00T inference server.
-- **Native** (per [cheatsheet.md](cheatsheet.md)): a `uv` venv at `~/env_isaaclab` with `isaacsim`, Isaac Lab installed `-e` from `~/IsaacLab`, LeRobot pinned to commit `e670ac5d`, then `uv pip install -e source/sim_to_real_so101/`. Activate with `source ~/env_isaaclab/bin/activate`.
+- **Native** (per [install_cheatsheet.md](install_cheatsheet.md)) — **this is the setup actually in use**: a `uv` venv at `~/env_isaaclab` (Python 3.11) with `isaacsim`, Isaac Lab installed `-e` from `~/IsaacLab`, LeRobot installed `-e` from `~/sim2real/lerobot` (branch `n1.7-graphen`, v0.4.3), then `uv pip install -e source/sim_to_real_so101/`. Activate with `source ~/env_isaaclab/bin/activate`. **The same venv drives the real robot** — there is no separate real-robot environment.
 
 The package exposes console-script entry points (defined in `pyproject.toml`); after install they are on PATH:
 
@@ -62,4 +62,6 @@ Every runnable script (`scripts/*.py`) **must launch the simulator before import
 
 ## Real-robot operations
 
-Hardware control, calibration, teleoperation, and the GR00T eval rollout commands are documented in [docker/README.md](docker/README.md) and [script.md](script.md) (port/camera env vars, `lerobot-calibrate`, `lerobot-teleoperate`, calibration-quality checks). These require physical hardware and run inside the Docker containers.
+Real-robot and sim commands are now in a **single** [run_cheatsheet.md](run_cheatsheet.md) (calibration → record → dataset tools → eval; the shared steps are written once). Calibration theory, drift checks and post-repair procedure are in [CALIBRATION.md](CALIBRATION.md). Calibration JSONs live in `~/sim2real/lerobot/calibration/` and are git-tracked there — sim and the real robot read the same files.
+
+[docker/README.md](docker/README.md) documents the upstream **single-arm** Docker flow; it is not the path this project uses.

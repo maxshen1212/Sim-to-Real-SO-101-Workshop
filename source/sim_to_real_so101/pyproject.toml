@@ -28,3 +28,5 @@ lerobot_agent_dual = "sim_to_real_so101.scripts.lerobot_agent_dual:main"
 lerobot_eval = "sim_to_real_so101.scripts.lerobot_eval:main"
 lerobot_eval_dual = "sim_to_real_so101.scripts.lerobot_eval_dual:main"
 lerobot_push_dataset = "sim_to_real_so101.scripts.lerobot_push_dataset:main"
+# 硬體設定腳本(純標準函式庫,不啟動 Isaac Sim)。指令名保留連字號,文件與手感都靠它。
+graphen-setup-udev = "sim_to_real_so101.scripts.graphen_setup_udev:main"

@@ -25,7 +25,10 @@ lerobot_agent --task Lerobot-So101-Teleop-Vials-To-Rack \
     --repo_id <hf_id/dataset> --repo_root ./datasets --task_name vials_to_rack   # teleop + record
 lerobot_eval  --task Lerobot-So101-Teleop-Vials-To-Rack-Eval                     # eval vs GR00T server
 lerobot_push_dataset --repo_id <hf_id/dataset>
+graphen-setup-udev                                     # SO-101 USB fixed-name setup/check (no Isaac Sim)
 ```
+
+`graphen-setup-udev` is the odd one out: pure stdlib, no Isaac Sim, no LeRobot import. It used to live in the LeRobot fork but belongs here with the rig data it reads — `calibration/config/arm_serials.json`, which it locates as `Path(__file__).parents[3] / ...`, i.e. this repo's root. Its entry-point name keeps the hyphen (unlike the underscore-style sim scripts) because the docs and muscle memory are built on it.
 
 Lint: `flake8` (config in `.flake8`, max line length 120). There is no test suite — validation is done by running the agents in Isaac Sim.
 

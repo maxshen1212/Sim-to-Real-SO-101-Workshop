@@ -1,0 +1,29 @@
+# Bimanual SO-101 Follower Calibration Config  (LeRobot 0.4.x)
+# Usage: lerobot-calibrate --config_path $WORKSHOP/calibration/config/bimanual_so101_follower_config.yaml
+#
+# NOTE: robot and teleop cannot be calibrated in the same run (script accepts only one at a time).
+#
+# Calibration writes TWO files (the top-level id is only a prefix, no id.json is created):
+#   bimanual_so101_follower_left.json
+#   bimanual_so101_follower_right.json
+#
+# 0.4.x notes:
+#   - Per-arm fields are FLAT (`left_arm_port`), not nested under `left_arm_config`.
+#   - `use_degrees` defaults to false => RANGE_M100_100 (+-100), which is the
+#     convention NVIDIA's GR00T reference pipeline uses. Left unset on purpose.
+#   - wrist_roll IS swept by default in 0.4.x (no `calibrate_wrist_roll_range`
+#     flag needed) -- `record_ranges_of_motion()` is called with no arguments,
+#     so every joint including wrist_roll gets a real measured range.
+
+robot:
+  type: bi_so101_follower
+  id: bimanual_so101_follower # filename prefix for the per-arm calibration files
+  calibration_dir: /home/graphen/sim2real/Sim-to-Real-SO-101-Workshop/calibration/bimanual_follower
+
+  left_arm_port: /dev/ttyFollowerLeft
+  left_arm_disable_torque_on_disconnect: true
+  left_arm_max_relative_target: null # set a positive float (e.g. 5.0) to cap motor movement for safety
+
+  right_arm_port: /dev/ttyFollowerRight
+  right_arm_disable_torque_on_disconnect: true
+  right_arm_max_relative_target: null

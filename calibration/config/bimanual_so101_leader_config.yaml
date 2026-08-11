@@ -1,0 +1,23 @@
+# Bimanual SO-101 Leader Calibration Config  (LeRobot 0.4.x)
+# Usage: lerobot-calibrate --config_path $WORKSHOP/calibration/config/bimanual_so101_leader_config.yaml
+#
+# NOTE: Calibrate leader arms separately from follower arms (script accepts only one at a time).
+#
+# Calibration writes TWO files (the top-level id is only a prefix, no id.json is created):
+#   bimanual_so101_leader_left.json
+#   bimanual_so101_leader_right.json
+#
+# 0.4.x notes:
+#   - BiSO100LeaderConfig has ONLY `left_arm_port` / `right_arm_port` (plus the
+#     `id` / `calibration_dir` it inherits). There is no per-arm use_degrees or
+#     calibrate_wrist_roll_range -- and neither is needed:
+#       * norm mode defaults to RANGE_M100_100 (+-100) on leader and follower alike
+#       * wrist_roll is swept by default (see the follower config for details)
+
+teleop:
+  type: bi_so101_leader
+  id: bimanual_so101_leader # filename prefix for the per-arm calibration files
+  calibration_dir: /home/graphen/sim2real/Sim-to-Real-SO-101-Workshop/calibration/bimanual_leader
+
+  left_arm_port: /dev/ttyLeaderLeft
+  right_arm_port: /dev/ttyLeaderRight

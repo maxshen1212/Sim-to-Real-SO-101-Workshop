@@ -4,8 +4,8 @@
 
 | 路徑 | |
 | --- | --- |
-| [calibration/bimanual_follower/](../lerobot/calibration/bimanual_follower/)、[calibration/bimanual_leader/](../lerobot/calibration/bimanual_leader/) | 四個 calibration JSON（會被 `lerobot-calibrate` 覆寫） |
-| [calibration/config/](../lerobot/calibration/config/) | 四個 YAML + `arm_serials.json`（USB 序號 → 手臂） |
+| [calibration/bimanual_follower/](calibration/bimanual_follower/)、[calibration/bimanual_leader/](calibration/bimanual_leader/) | 四個 calibration JSON（會被 `lerobot-calibrate` 覆寫） |
+| [calibration/config/](calibration/config/) | 四個 YAML + `arm_serials.json`（USB 序號 → 手臂） |
 
 ---
 
@@ -44,8 +44,8 @@ norm = (raw - range_min) / (range_max - range_min) * 200 - 100
 所以單臂寫出來的就是雙臂類別之後會讀的同一個檔 —— 不用改任何程式碼。
 
 ```bash
-CF=~/sim2real/lerobot/calibration/bimanual_follower
-CL=~/sim2real/lerobot/calibration/bimanual_leader
+CF=~/sim2real/Sim-to-Real-SO-101-Workshop/calibration/bimanual_follower
+CL=~/sim2real/Sim-to-Real-SO-101-Workshop/calibration/bimanual_leader
 
 lerobot-calibrate --robot.type=so101_follower --robot.port=/dev/ttyFollowerLeft \
   --robot.id=bimanual_so101_follower_left   --robot.calibration_dir=$CF
@@ -67,7 +67,7 @@ git -C ~/sim2real/lerobot add calibration/ && git -C ~/sim2real/lerobot commit -
 > 逐支跑把暴露窗口從幾分鐘縮到幾十秒。
 >
 > 雙臂 config 仍然可以用來**重用**既有校準（提示時按 ENTER 寫回馬達）：
-> `lerobot-calibrate --config_path=$HOME/sim2real/lerobot/calibration/config/bimanual_so101_follower_config.yaml`
+> `lerobot-calibrate --config_path=$HOME/sim2real/Sim-to-Real-SO-101-Workshop/calibration/config/bimanual_so101_follower_config.yaml`
 
 已有校準檔時會先問：**ENTER = 把舊檔寫回馬達（不重掃）**，**`c` = 重新校準**。
 
@@ -188,7 +188,7 @@ git -C ~/sim2real/lerobot diff calibration/
 四支控制板用同一顆晶片（`1a86:55d3` WCH CH343），`/dev/ttyACM*` 的編號會隨插拔改變。
 udev 依 **USB 序號**綁成固定名稱 `/dev/tty{Follower,Leader}{Left,Right}`，
 規則檔在 `/etc/udev/rules.d/99-robot.rules`，序號表在
-[calibration/config/arm_serials.json](../lerobot/calibration/config/arm_serials.json)（跟著 repo 走）。
+[calibration/config/arm_serials.json](calibration/config/arm_serials.json)（跟著 repo 走）。
 
 ```bash
 graphen-setup-udev              # 檢查目前連線（預設，不改動任何東西）

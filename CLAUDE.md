@@ -62,6 +62,13 @@ Every runnable script (`scripts/*.py`) **must launch the simulator before import
 
 ## Real-robot operations
 
-Real-robot and sim commands are now in a **single** [run_cheatsheet.md](run_cheatsheet.md) (calibration → record → dataset tools → eval; the shared steps are written once). Calibration theory, drift checks and post-repair procedure are in [CALIBRATION.md](CALIBRATION.md). Calibration JSONs live in `~/sim2real/lerobot/calibration/` and are git-tracked there — sim and the real robot read the same files.
+Sim and real-robot operations share one pipeline (calibration → record → dataset tools → eval), split across two documents:
+
+- **[run_cheatsheet.md](run_cheatsheet.md) — commands only**, scoped by stage (§1 setup, §2 calibration, §3 record sim, §4 record real, §5 dataset tools, §6 eval sim, §7 eval real). Every command uses the `$WORKSHOP` / `$LEROBOT` / `$CONFIG_DIR` / `$CALIB_FOLLOWER` / `$CALIB_LEADER` / `$DATASET_SIM` / `$DATASET_REAL` variables defined in its §0.
+- **[run_notes.md](run_notes.md) — the reasoning**: why each step is done that way, the failure modes, and how to recover. Every warning in it was written after actually hitting the problem; don't prune them as boilerplate.
+
+When adding an operational fact, decide which file it belongs in: a command goes in the cheatsheet, a *reason* goes in the notes. Keep them consistent — they cover the same steps.
+
+Calibration theory, drift checks and post-repair procedure are in [CALIBRATION.md](CALIBRATION.md). Calibration JSONs live in `~/sim2real/Sim-to-Real-SO-101-Workshop/calibration/` and are git-tracked there — sim and the real robot read the same files. Recorded datasets live under this repo's `datasets/` (both sim and real).
 
 [docker/README.md](docker/README.md) documents the upstream **single-arm** Docker flow; it is not the path this project uses.

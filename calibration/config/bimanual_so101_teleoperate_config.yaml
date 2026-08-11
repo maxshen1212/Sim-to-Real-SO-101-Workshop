@@ -1,0 +1,44 @@
+# Bimanual SO-101 Teleoperation Config  (LeRobot 0.4.x)
+# Usage: lerobot-teleoperate --config_path $WORKSHOP/calibration/config/bimanual_so101_teleoperate_config.yaml
+#
+# Unlike calibration, teleoperation needs BOTH robot (follower) and teleop (leader)
+# in the SAME run. The id + calibration_dir below MUST match the values used during
+# calibration so the saved calibration files are loaded instead of re-running it:
+#   robot  -> calibration/bimanual_follower/bimanual_so101_follower_{left,right}.json
+#   teleop -> calibration/bimanual_leader/bimanual_so101_leader_{left,right}.json
+#
+# 0.4.x notes:
+#   - Per-arm fields are FLAT (`left_arm_port`), not nested under `left_arm_config`.
+#   - Cameras are a SINGLE top-level `cameras` dict shared by both arms, and the
+#     keys are used AS-IS in observations (no `left_`/`right_` prefixing). This is
+#     simpler than 0.6.x, which needed a workaround to keep the keys unprefixed.
+#   - Cameras are left commented out here; teleop does not need them. See the
+#     record config for the live camera block.
+
+robot:
+  type: bi_so101_follower
+  id: bimanual_so101_follower
+  calibration_dir: /home/graphen/sim2real/Sim-to-Real-SO-101-Workshop/calibration/bimanual_follower
+
+  left_arm_port: /dev/ttyFollowerLeft
+  right_arm_port: /dev/ttyFollowerRight
+
+  # cameras:
+  #   wrist_left:
+  #     { type: intelrealsense, serial_number_or_name: "138422071840", width: 640, height: 480, fps: 30 }
+  #   center:
+  #     { type: intelrealsense, serial_number_or_name: "138422076217", width: 640, height: 480, fps: 30 }
+  #   wrist_right:
+  #     { type: intelrealsense, serial_number_or_name: "138422072598", width: 640, height: 480, fps: 30 }
+
+teleop:
+  type: bi_so101_leader
+  id: bimanual_so101_leader
+  calibration_dir: /home/graphen/sim2real/Sim-to-Real-SO-101-Workshop/calibration/bimanual_leader
+
+  left_arm_port: /dev/ttyLeaderLeft
+  right_arm_port: /dev/ttyLeaderRight
+
+# Loop / display options (top-level TeleoperateConfig fields)
+fps: 30
+display_data: true # stream cameras + state to Rerun

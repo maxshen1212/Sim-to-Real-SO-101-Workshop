@@ -18,7 +18,7 @@
 #
 #
 # port 走 udev 固定名稱（`graphen-setup-udev --apply` 一次設定，之後插拔都不會變），
-# 校正檔與真機共用 lerobot/calibration/bimanual_leader/ 底下同樣那兩個 JSON。
+# 校正檔與真機共用 workshop 的 calibration/bimanual_leader/ 底下同樣那兩個 JSON。
 # 平常不需要設任何環境變數；要覆寫才用 TELEOP_PORT_LEFT / TELEOP_ID_LEFT / ...
 import argparse
 import os
@@ -40,7 +40,7 @@ parser.add_argument("--id_right", type=str,
 # 校正檔目錄 —— 與真機共用同一份，不要讓它掉回 LeRobot 的 HF cache
 parser.add_argument("--calibration_dir", type=str,
                     default=os.getenv("TELEOP_CALIBRATION_DIR",
-                                      "/home/graphen/sim2real/lerobot/calibration/bimanual_leader"))
+                                      "/home/graphen/sim2real/Sim-to-Real-SO-101-Workshop/calibration/bimanual_leader"))
 # 錄製（三個都給才會啟用）
 parser.add_argument("--repo_id", type=str, default=None)
 parser.add_argument("--repo_root", type=str, default=None)

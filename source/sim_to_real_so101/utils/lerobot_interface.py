@@ -114,7 +114,7 @@ class LeRobotSO101Interface:
 
     def make_cfg(self):
         # calibration_dir is passed through so sim reads the SAME calibration JSONs as the
-        # real robot (lerobot/calibration/...). Left as None it falls back to LeRobot's HF
+        # real robot (Sim-to-Real-SO-101-Workshop/calibration/...). Left as None it falls back to LeRobot's HF
         # cache, which silently gives the arms a second, independent calibration -- the two
         # then fight over the motors' EEPROM every time you switch between sim and real.
         kwargs = {"port": self.port, "id": self.id}

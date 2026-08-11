@@ -9,7 +9,7 @@ Phase 8 的真機 eval 管線已經打通(server/client 都驗過),但要等新�
 
 最後更新:2026-08-11
 
-> 這份文件只記**決策與狀態**。指令在 [run_cheatsheet.md](run_cheatsheet.md)(sim + 真機合併)、
+> 這份文件只記**決策與狀態**。指令在 [run_cheatsheet.md](run_cheatsheet.md)(只有指令)、原理與陷阱在 [run_notes.md](run_notes.md)、
 > [install_cheatsheet.md](install_cheatsheet.md)(安裝)、
 > [CALIBRATION.md](CALIBRATION.md)(校準判讀)。
 
@@ -29,7 +29,7 @@ Phase 8 的真機 eval 管線已經打通(server/client 都驗過),但要等新�
 | **dataset schema** | 12 維 state/action(`left_*`×6 + `right_*`×6)+ 3 相機(`wrist_left`/`wrist_right`/`center`,480×640)+ fps=30 |
 | **控制率 / fps** | sim env **30 Hz**(`sim.dt=1/120` × `decimation=4`)= 真機 RealSense 30 fps。<br>sim 錄製每個 env step 推一格,recorder 的 fps 由 `env.step_dt` 推導 → 標籤 = sim 時間 = 真機時間 |
 | **關節正規化** | `RANGE_M100_100`(±100),sim / 真機同一套。`use_degrees` 一律不設 |
-| **校正檔** | 統一放 `lerobot/calibration/`(git 追蹤),sim 與真機**讀同一份**,不用 HF cache |
+| **校正檔** | 統一放 `Sim-to-Real-SO-101-Workshop/calibration/`(git 追蹤),sim 與真機**讀同一份**,不用 HF cache |
 
 **兩個核心觀念**:① 真實場景**幾何要**對齊 sim(尺寸、相機位姿/FOV、佈局),**外觀不要**(交給 DR)。
 ② GR00T 只吃 RGB + 關節狀態,**沒有內建物件計數器** → 要對「試管數量」魯棒就得在資料裡涵蓋不同數量。
@@ -70,7 +70,7 @@ Env:`Lerobot-So101-Dual-{Base,Vials-To-Rack,Vials-To-Rack-DR,-Eval,-DR-Eval}`。
 
 **資料與模型**:sim 74 集 → `ChihHanShen/bimanual-so101-pickvials`;真機 50 集;
 純 sim 與 real+sim co-training 兩個 checkpoint 都已訓好。
-遙操作用兩支 leader,port 走 udev 固定名稱、**校正檔與真機共用** `lerobot/calibration/bimanual_leader/`
+遙操作用兩支 leader,port 走 udev 固定名稱、**校正檔與真機共用** `Sim-to-Real-SO-101-Workshop/calibration/bimanual_leader/`
 (`lerobot_agent_dual` 的預設值已指過去,不用設環境變數)。
 刪壞集用 `tools/delete_episodes.py <檔號>`(**檔號、非 episode_index**)。
 
@@ -154,7 +154,7 @@ cd ~/sim2real/Isaac-GR00T/gr00t/eval/real_robot/SO101_bimanual && python eval_so
 - [x] checkpoint 契約吻合、server 通聯實測(延遲 0.070 s)、12 顆馬達正常、相機 key 無前綴
 - [x] client 環境就緒(`gr00t` 已裝進 `env_isaaclab`,`--help` 實跑通過)
 - [ ] **兩批資料收完後跑 `tools/check_dataset_parity.py`**(sim/real 規格一致 + 值域重疊,
-      見 run_cheatsheet C1.5)。**這是 co-train 的前置閘門** —— 不過就不要開始訓練
+      見 run_cheatsheet §5)。**這是 co-train 的前置閘門** —— 不過就不要開始訓練
 - [ ] **首次帶電**:1 集、`max_relative_target` 全設 0.5、手放電源開關
 - [ ] **全速單集**,跟 `lerobot-replay` 的真人 demo 並排比對速度(驗 10 Hz)
 - [ ] **20 集正式跑**,再換純 sim checkpoint 重跑一輪做對照

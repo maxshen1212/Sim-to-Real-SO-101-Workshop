@@ -1,0 +1,103 @@
+# Bimanual SO-101 Dataset Recording Config  (LeRobot 0.4.x)
+# Usage: lerobot-record --config_path $WORKSHOP/calibration/config/bimanual_so101_record_config.yaml
+#
+# Same robot + teleop blocks as the teleoperate config, plus a `dataset:` block.
+# During recording: RIGHT arrow = finish episode early / skip reset -> next episode,
+#                   LEFT arrow  = re-record the last episode,
+#                   ESC         = stop recording and save.
+#
+# 0.4.x notes:
+#   - Per-arm fields are FLAT (`left_arm_port`), not nested under `left_arm_config`.
+#   - Cameras are a SINGLE top-level `cameras` dict shared by both arms and the keys
+#     are used AS-IS, so the dataset columns come out as
+#     `observation.images.{wrist_left,center,wrist_right}` -- matching the sim dataset
+#     and GR00T's `examples/SO101_bimanual/modality.json` exactly.
+#     (0.6.x needed a workaround for this; 0.4.x does it natively.)
+#   - The 0.6.x streaming-encoder options (`streaming_encoding`,
+#     `encoder_queue_maxsize`, `encoder_threads`) DO NOT EXIST in 0.4.x.
+#     0.4.x encodes inside `save_episode()` using image-writer threads/processes
+#     instead. See the `--- video encoding ---` block below.
+
+robot:
+  type: bi_so101_follower
+  id: bimanual_so101_follower
+  calibration_dir: /home/graphen/sim2real/Sim-to-Real-SO-101-Workshop/calibration/bimanual_follower
+
+  left_arm_port: /dev/ttyFollowerLeft
+  right_arm_port: /dev/ttyFollowerRight
+
+  cameras:
+    wrist_left:
+      {
+        type: intelrealsense,
+        serial_number_or_name: "138422071840",
+        width: 640,
+        height: 480,
+        fps: 30,
+      }
+    center:
+      {
+        type: intelrealsense,
+        serial_number_or_name: "138422076217",
+        width: 640,
+        height: 480,
+        fps: 30,
+      }
+    wrist_right:
+      {
+        type: intelrealsense,
+        serial_number_or_name: "138422072598",
+        width: 640,
+        height: 480,
+        fps: 30,
+      }
+
+teleop:
+  type: bi_so101_leader
+  id: bimanual_so101_leader
+  calibration_dir: /home/graphen/sim2real/Sim-to-Real-SO-101-Workshop/calibration/bimanual_leader
+
+  left_arm_port: /dev/ttyLeaderLeft
+  right_arm_port: /dev/ttyLeaderRight
+
+dataset:
+  repo_id: ChihHanShen/bimanual-so101-pickvials-real # change to {your_hf_username}/{dataset_name}
+  root: /home/graphen/sim2real/Sim-to-Real-SO-101-Workshop/datasets/bimanual-so101-pickvials-real
+  single_task: "Pick up the vial and place it in the rack"
+  fps: 30 # MUST match the camera fps above (record errors if mismatched)
+  num_episodes: 50
+
+  episode_time_s: 90 # seconds to record per episode
+  reset_time_s: 60 # seconds to reset the scene between episodes
+  video: true # encode frames to video (recommended)
+
+  # --- video encoding (0.4.x model) ---
+  # 0.4.x writes frames as PNGs via writer threads, then encodes in save_episode().
+  # 4 threads per camera is the upstream recommendation (and the default) when using
+  # 0 subprocesses; raise `num_image_writer_processes` only if fps proves unstable.
+  num_image_writer_processes: 0
+  num_image_writer_threads_per_camera: 4
+  # Encode every episode immediately (1) rather than batching, so a crash costs at
+  # most one episode.
+  video_encoding_batch_size: 1
+
+  push_to_hub: false # set true to upload to the Hugging Face Hub (requires `hf auth login`)
+
+# Display options (top-level RecordConfig fields)
+display_data: false # stream cameras + state to Rerun
+play_sounds: true # vocal cues for episode start/stop
+
+# resume=true  -> LeRobotDataset(...)        載入既有資料集並 append
+# resume=false -> LeRobotDataset.create(...) 建立新資料集
+#
+# 這裡留 true,因為那是常態(每次接續收資料)。但 `root` 底下還沒有資料集時,
+# true 會失敗:load 找不到本地 meta/info.json -> 回退去 Hub 抓 -> 空的 HF repo
+# 沒有 codebase version tag -> RevisionNotFoundError。訊息完全看不出真正原因。
+#
+# 所以「這批資料集的第一次錄製」要在命令列覆寫一次:
+#     lerobot-record --config_path=... --resume=false
+# 之後就用不帶旗標的原指令。
+#
+# 不用怕誤用:create() 是 mkdir(exist_ok=False),資料夾已存在會直接
+# FileExistsError,不會覆蓋既有資料。
+resume: true # append episodes to an existing dataset(第一次錄請加 --resume=false)

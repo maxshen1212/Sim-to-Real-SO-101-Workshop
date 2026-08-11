@@ -1,0 +1,7 @@
+{
+    "_comment": "SO-101 四支手臂的 USB 序號。由 `graphen-setup-udev --identify` 產生，也可以手動編輯。換 USB 轉板時才需要更新。",
+    "follower_left": "5B42076951",
+    "follower_right": "5AE7044259",
+    "leader_left": "5AE7044541",
+    "leader_right": "5AF7173601"
+}

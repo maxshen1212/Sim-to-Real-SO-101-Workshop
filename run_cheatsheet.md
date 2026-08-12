@@ -120,7 +120,7 @@ lerobot-replay \
   --robot.right_arm_port=/dev/ttyFollowerRight \
   --dataset.repo_id=ChihHanShen/bimanual-so101-pickvials-real \
   --dataset.root=$DATASET_REAL \
-  --dataset.episode=0 --dataset.fps=30
+  --dataset.episode=10 --dataset.fps=30
 ```
 
 按鍵(pynput 全域監聽,**跟 sim 不一樣**):**→** 結束這集 / 略過等待 ·
@@ -131,34 +131,26 @@ lerobot-replay \
 ## §5 資料集整理(sim/real 共用)
 
 ```bash
-# 5-1  單批自檢 + sim↔real 規格與值域比對(co-train 前的閘門)
-python tools/check_dataset_parity.py --sim $DATASET_SIM --real $DATASET_REAL
-python tools/check_dataset_parity.py --real $DATASET_REAL        # 只收好一批也能跑
-#   --quick 不讀 parquet | --strict WARN 也算失敗 | --iou-warn 調重疊門檻
-
-# 5-2  視覺化(影片 + 12 維曲線同步播放,Rerun 視窗)
+# 5-1  視覺化(影片 + 12 維曲線同步播放,Rerun 視窗)
 lerobot-dataset-viz --repo-id ChihHanShen/bimanual-so101-pickvials-sim \
   --root $DATASET_SIM --episode-index 47
 
-# 5-3  刪掉品質不好的 episode(先改 tools/*.py 最上面兩行 REPO / ROOT)
+# 5-2  刪掉品質不好的 episode
 python tools/list_episodes.py                # 列出「檔號 → episode_index」對照
 python tools/delete_episodes.py 47 30        # 刪 file-047、file-030(用檔號,不是 episode_index)
 
-# 5-4  上傳 / 下載
+# 5-3  上傳 / 下載
 hf auth login                                # 第一次;寫入需 write token
+lerobot_push_dataset --repo-id ChihHanShen/bimanual-so101-pickvials-real --root $DATASET_REAL
+lerobot_push_dataset --repo-id ChihHanShen/bimanual-so101-pickvials-sim --root $DATASET_SIM
 hf download ChihHanShen/bimanual-so101-pickvials-real \
   --repo-type dataset --local-dir $DATASET_REAL
-lerobot_push_dataset --repo-id ChihHanShen/bimanual-so101-pickvials-sim --root $DATASET_SIM
+hf download ChihHanShen/bimanual-so101-pickvials-sim \
+  --repo-type dataset --local-dir $DATASET_SIM
 ```
 
 ⚠️ **不要用 `lerobot-edit-dataset`** —— 在 0.4.3 對本專案的扁平 layout 是壞的,用上面的 `tools/`。
 刪過集之後要讓 Hub 精確鏡像本機(清孤兒 mp4)的寫法在 [run_notes.md](run_notes.md) §C3。
-
-檢查器本身的測試(合成資料集 + 注入十種故障,不需硬體):
-
-```bash
-python tools/test_check_dataset_parity.py    # 15 個情境,約 1 分鐘
-```
 
 ---
 

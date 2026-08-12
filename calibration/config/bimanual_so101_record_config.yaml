@@ -65,7 +65,7 @@ dataset:
   root: /home/graphen/sim2real/Sim-to-Real-SO-101-Workshop/datasets/bimanual-so101-pickvials-real
   single_task: "Pick up the vial and place it in the rack"
   fps: 30 # MUST match the camera fps above (record errors if mismatched)
-  num_episodes: 50
+  num_episodes: 20
 
   episode_time_s: 90 # seconds to record per episode
   reset_time_s: 60 # seconds to reset the scene between episodes

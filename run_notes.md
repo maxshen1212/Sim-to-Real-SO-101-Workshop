@@ -211,39 +211,11 @@ PY
 lerobot-dataset-viz --repo-id <id> --root <path> --episode-index 47
 ```
 
-### C1.5 sim ↔ real 規格一致性(co-train 前必跑)
-
-上面那段只看單一資料集。**兩批要一起訓練之前**,用這支把「規格一致」和「值域對得上」
-一次驗完 —— schema 差一個欄位名、fps 差一倍、單位差一個 scale,GR00T 都不會報錯,只會學壞:
-
-```bash
-python tools/check_dataset_parity.py \
-  --sim  ~/sim2real/Sim-to-Real-SO-101-Workshop/datasets/bimanual-so101-pickvials-sim \
-  --real ~/sim2real/Sim-to-Real-SO-101-Workshop/datasets/bimanual-so101-pickvials-real
-```
-
-只收好一批也能跑(給一個旗標就好),會做完該批的自檢再跳過比對。
-其他旗標:`--quick` 不讀 parquet(只信 `meta/stats.json`,快但較粗)、
-`--strict` 把 WARN 也當失敗、`--iou-warn` 調值域重疊的告警門檻。離開碼 0 = 全過。
-
-它檢查四件事:
-
-| 區塊 | 內容 |
-| --- | --- |
-| 1. 單批自檢 | fps=30、`(12,)` float32、names 順序含 `.pos`、三台相機 480×640 video、`video.fps` 對得上、任務字串、**手臂 ±100 / 夾爪 0~100**、有無關節整批沒動、timestamp 自洽 |
-| 2. 規格比對 | 欄位集合、names 與順序、dtype、shape、相機 key、fps、任務字串 —— **硬性相等** |
-| 3. 值域比對 | 12 個關節逐一列 sim/real 的 min/max、重疊度、span 比。**完全不相交 = FAIL**(單位或校準錯);重疊少 = WARN。另外比對每格位移量,抓「時間基準差一倍」 |
-| 4. modality | 12 維切法 `0:5 / 5:6 / 6:11 / 11:12` 與三個 video key 對得上 checkpoint 的 `modality.json` |
-
-> **值域「一樣」的正確定義**:兩批是不同軌跡,min/max 本來就不會相等。要驗的是
-> **分佈重疊**。完全不相交才是真問題 —— 那代表兩邊根本不在同一個座標系,
-> 依序查:單位(DEGREES vs ±100)→ 左右臂有沒有對調 → 校準檔是不是同一份。
-
-檢查器自己也有測試(建合成資料集 + 注入十種故障,不需硬體):
-
-```bash
-python tools/test_check_dataset_parity.py     # 15 個情境,約 1 分鐘
-```
+> **兩批要一起訓練之前**,值域「一樣」的正確定義是**分佈重疊**,不是 min/max 相等
+> ——兩批是不同軌跡,不會剛好相等。真正的問題訊號是**完全不相交**:代表兩邊根本
+> 不在同一個座標系,依序查:單位(DEGREES vs ±100)→ 左右臂有沒有對調 →
+> 校準檔是不是同一份。可以直接把兩邊的 `meta/stats.json` 的 `observation.state.min/max`
+> 攤開來比,或用上面的 rerun 視覺化分別看兩集。
 
 ### C2 刪掉品質不好的 episode
 

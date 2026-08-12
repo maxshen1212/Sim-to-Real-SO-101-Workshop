@@ -24,7 +24,7 @@ random_agent --task Lerobot-So101-Teleop-Base          # debug, random actions
 lerobot_agent --task Lerobot-So101-Teleop-Vials-To-Rack \
     --repo_id <hf_id/dataset> --repo_root ./datasets --task_name vials_to_rack   # teleop + record
 lerobot_eval  --task Lerobot-So101-Teleop-Vials-To-Rack-Eval                     # eval vs GR00T server
-lerobot_push_dataset --repo_id <hf_id/dataset>
+lerobot_push_dataset --repo-id <hf_id/dataset> --root <path>   # 注意是 --repo-id,argparse 不接受底線
 graphen-setup-udev                                     # SO-101 USB fixed-name setup/check (no Isaac Sim)
 ```
 

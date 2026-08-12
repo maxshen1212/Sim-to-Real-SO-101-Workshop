@@ -153,8 +153,9 @@ cd ~/sim2real/Isaac-GR00T/gr00t/eval/real_robot/SO101_bimanual && python eval_so
 
 - [x] checkpoint 契約吻合、server 通聯實測(延遲 0.070 s)、12 顆馬達正常、相機 key 無前綴
 - [x] client 環境就緒(`gr00t` 已裝進 `env_isaaclab`,`--help` 實跑通過)
-- [ ] **兩批資料收完後跑 `tools/check_dataset_parity.py`**(sim/real 規格一致 + 值域重疊,
-      見 run_cheatsheet §5)。**這是 co-train 的前置閘門** —— 不過就不要開始訓練
+- [ ] **兩批資料收完後手動核對 sim/real 的 schema 與值域**(names/shape/fps 是否一致、
+      `meta/stats.json` 的 min/max 是否落在同一個範圍)。**這是 co-train 的前置閘門** ——
+      不過就不要開始訓練
 - [ ] **首次帶電**:1 集、`max_relative_target` 全設 0.5、手放電源開關
 - [ ] **全速單集**,跟 `lerobot-replay` 的真人 demo 並排比對速度(驗 10 Hz)
 - [ ] **20 集正式跑**,再換純 sim checkpoint 重跑一輪做對照

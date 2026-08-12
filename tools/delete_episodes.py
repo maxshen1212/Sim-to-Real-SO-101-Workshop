@@ -9,10 +9,17 @@ episode_index。這支工具讓你直接給檔號,內部自動換算成 episode_
 
 用法(在專案根目錄、isaaclab venv 裡執行):
 
-    python tools/delete_episodes.py 47 30      # 刪掉 file-047 和 file-030 那兩集
+    python tools/delete_episodes.py 47 30      # sim 資料集(預設),刪 file-047 / file-030
+    python tools/delete_episodes.py 12 \
+        --repo ChihHanShen/bimanual-so101-pickvials-real \
+        --root datasets/bimanual-so101-pickvials-real     # 改編 real
 
 （用 tools/list_episodes.py 可以列出目前每一集的檔號。）
+
+安全性:先把刪除後的結果寫到 <root>_edit_tmp 並驗證集數,才把原本的搬到 <root>_bak、
+新的搬進正式位置,再驗證一次才刪備份。中途出錯原始資料都還在 _bak。
 """
+import argparse
 import glob
 import shutil
 import sys
@@ -23,26 +30,34 @@ import pyarrow.parquet as pq
 from lerobot.datasets.lerobot_dataset import LeRobotDataset
 from lerobot.datasets.dataset_tools import delete_episodes
 
-# 要編輯的資料集。換別的資料集只要改這兩行。
-REPO = "ChihHanShen/bimanual-so101-pickvials"
-ROOT = "datasets/bimanual-so101-pickvials"
+# 預設編輯 sim 資料集;要編 real 就下 --root/--repo(不必再改這個檔案)。
+DEFAULT_REPO = "ChihHanShen/bimanual-so101-pickvials-sim"
+DEFAULT_ROOT = "datasets/bimanual-so101-pickvials-sim"
 
 
 def main():
-    # 命令列參數 = 要刪除的「檔號」(file-XXX 的 XXX,可多個)
-    if len(sys.argv) < 2:
-        sys.exit("用法: python tools/delete_episodes.py <檔號> [更多檔號...]   例: 47 30")
-    file_nums = sorted({int(x) for x in sys.argv[1:]})
+    p = argparse.ArgumentParser(
+        description="用檔號(file-XXX)刪除 episode",
+        epilog="例:python tools/delete_episodes.py 47 30",
+    )
+    p.add_argument("file_nums", type=int, nargs="+", metavar="檔號",
+                   help="要刪除的檔號(file-XXX 的 XXX),可給多個")
+    p.add_argument("--repo", default=DEFAULT_REPO, help=f"repo_id(預設 {DEFAULT_REPO})")
+    p.add_argument("--root", default=DEFAULT_ROOT, help=f"資料集路徑(預設 {DEFAULT_ROOT})")
+    args = p.parse_args()
 
-    root = Path(ROOT).resolve()
+    repo = args.repo
+    file_nums = sorted(set(args.file_nums))
+    root = Path(args.root).resolve()
+    print(f"[INFO] 資料集 {repo}\n       {root}")
 
     # 載入現有資料集。若資料集損壞/無法載入,會在這裡直接報錯。
-    ds = LeRobotDataset(REPO, root=root)
+    ds = LeRobotDataset(repo, root=root)
     n = ds.meta.total_episodes
 
     # 建立「檔號 -> episode_index」對照表(從 meta/episodes 讀,data 檔號=影片檔號)
     file_to_ep = {}
-    for f in glob.glob(f"{root}/meta/episodes/chunk-000/*.parquet"):
+    for f in glob.glob(f"{root}/meta/episodes/chunk-*/*.parquet"):
         t = pq.read_table(f, columns=["episode_index", "data/file_index"])
         for i in range(t.num_rows):
             file_to_ep[t.column("data/file_index").to_pylist()[i]] = t.column("episode_index").to_pylist()[i]
@@ -68,10 +83,10 @@ def main():
 
     # 1) 呼叫官方 delete_episodes:把「刪掉指定集之後」的結果寫成全新資料集到 tmp_out
     #    (不會動到原本的資料集;一集一檔時保留的檔案是直接複製、不重編碼)
-    delete_episodes(ds, episode_indices=episodes, output_dir=tmp_out, repo_id=REPO)
+    delete_episodes(ds, episode_indices=episodes, output_dir=tmp_out, repo_id=repo)
 
     # 2) 先確認新資料集能正常載入、集數正確,才敢動原本的
-    chk = LeRobotDataset(REPO, root=tmp_out)
+    chk = LeRobotDataset(repo, root=tmp_out)
     assert chk.meta.total_episodes == n - len(episodes), "刪除後集數不符,中止"
 
     # 3) 安全替換:原本的搬去 _bak → 新的搬進正式位置 → 再驗證 → 確認無誤才刪備份
@@ -79,7 +94,7 @@ def main():
     shutil.move(str(root), str(bak))
     shutil.move(str(tmp_out), str(root))
     shutil.rmtree(root / "images", ignore_errors=True)  # 清掉 LeRobot 可能留下的空暫存資料夾
-    final = LeRobotDataset(REPO, root=root)
+    final = LeRobotDataset(repo, root=root)
     print(f"[OK] 完成,現在 {final.meta.total_episodes} 集")
     shutil.rmtree(bak)
 

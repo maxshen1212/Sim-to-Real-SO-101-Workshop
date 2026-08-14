@@ -1,133 +1,104 @@
 # Sim-to-Real SO-101 Workshop — Local Environment Cheat Sheet
 
-Native (no Docker) install on Ubuntu + NVIDIA Blackwell. Docker users follow the README instead.
-
-| Item      | Spec                                                          |
-| --------- | ------------------------------------------------------------- |
-| GPU       | NVIDIA Blackwell (RTX 5060 Pro), CUDA 13.0                     |
-| OS        | Ubuntu 22.04+                                                  |
-| Isaac     | Isaac Sim 5.1.0.0 / Isaac Lab 0.54.4                           |
-| Python    | 3.11 only — `isaacsim 5.1` is `Requires-Python: ==3.11.*`      |
-
-**Already have a working env?** Skip to [Restore](#restore).
-
----
-
-## Step 1 — Fix IOMMU (native only)
-
-Without this Isaac Sim's CUDA init fails with `error 999`.
+## Step 0 — System prerequisites
 
 ```bash
-sudo nano /etc/default/grub     # append iommu=pt to GRUB_CMDLINE_LINUX_DEFAULT
+sudo nano /etc/default/grub
 sudo update-grub && sudo reboot
 ```
 
-## Step 2 — Isaac Sim + Isaac Lab
-
 ```bash
-uv venv ~/env_isaaclab --python 3.11
-
-uv pip install --python ~/env_isaaclab/bin/python \
-    isaacsim==5.1.0.0 --extra-index-url https://pypi.nvidia.com
-
-cd ~/IsaacLab
-uv pip install --python ~/env_isaaclab/bin/python \
-    -e source/isaaclab -e source/isaaclab_tasks -e source/isaaclab_rl -e source/isaaclab_assets
+sudo apt-get update && sudo apt-get install -y --no-install-recommends \
+    ffmpeg libx11-6 libxcursor1 libxrandr2 libxi6 libxinerama1 \
+    libxkbcommon0 libxkbcommon-x11-0
 ```
 
-## Step 3 — LeRobot, branch `n1.7-graphen` (v0.4.3, base `e670ac5d`)
-
-**One checkout, one venv — sim and real robot share both.** v0.4.3 requires only Python 3.10+, so
-it runs in Isaac Sim's 3.11 env; and its `use_degrees=False` default (±100) matches what NVIDIA's
-GR00T reference pipeline pins. The old `~/lerobot-pinned` worktree is gone — do not recreate it.
+## Step 1 — Isaac Sim + Isaac Lab
 
 ```bash
+uv venv ~/env_isaaclab --python 3.11 --seed
+source ~/env_isaaclab/bin/activate
+
+uv pip install "isaacsim[all,extscache]==5.1.0.0" \
+    --extra-index-url https://pypi.nvidia.com
+
+git clone https://github.com/isaac-sim/IsaacLab/tree/v2.3.2 ~/IsaacLab
+cd ~/IsaacLab
+./isaaclab.sh --install
+```
+
+```bash
+echo 'export OMNI_KIT_ACCEPT_EULA=YES' >> ~/.bashrc && source ~/.bashrc
+```
+
+## Step 2 — LeRobot, branch `n1.7-graphen`
+
+```bash
+git clone https://github.com/maxshen1212/lerobot.git ~/sim2real/lerobot
 cd ~/sim2real/lerobot
 git checkout n1.7-graphen
 
-uv pip install --python ~/env_isaaclab/bin/python --no-deps -e ~/sim2real/lerobot
+uv pip install --no-deps -e ~/sim2real/lerobot
 ```
 
-No fork checked out? `git clone https://github.com/maxshen1212/lerobot.git ~/sim2real/lerobot && cd ~/sim2real/lerobot && git checkout n1.7-graphen`
-
-- `--no-deps` keeps LeRobot from moving Isaac's `torch` / `numpy`.
-- Editable install → don't move or delete `~/sim2real/lerobot`.
-- **Do not create a `.venv` inside `~/sim2real/lerobot`** (i.e. no `uv run` in there) — the real-robot
-  commands are meant to run in `~/env_isaaclab` too. See [ROADMAP.md](ROADMAP.md) (technical debt).
-
-## Step 4 — Dependencies
-
 ```bash
-uv pip install --python ~/env_isaaclab/bin/python \
+printf '%s\n' \
+    "packaging==23.0" \
     "numpy==1.26.0" \
+    "lxml==4.9.4" \
     "torch==2.7.0" \
+    "torchvision==0.22.0" \
+    "imageio==2.37.0" \
+    > /tmp/lerobot-constraints.txt
+
+uv pip install -c /tmp/lerobot-constraints.txt \
     "datasets>=4.0.0,<4.2.0" \
     "diffusers>=0.27.2,<0.36.0" \
+    "huggingface-hub[hf-transfer,cli]>=0.34.2,<0.36.0" \
     "accelerate>=1.10.0,<2.0.0" \
+    "cmake>=3.29.0.1,<4.2.0" \
     "av>=15.0.0,<16.0.0" \
     "jsonlines>=4.0.0,<5.0.0" \
     "pynput>=1.7.7,<1.9.0" \
     "pyserial>=3.5,<4.0" \
+    "wandb>=0.20.0,<0.22.0" \
     "torchcodec>=0.2.1,<0.6.0" \
     "draccus==0.10.0" \
     "deepdiff>=7.0.1,<9.0.0" \
     "feetech-servo-sdk>=1.0.0,<2.0.0"
 
-# rerun-sdk wants numpy>=2 — install without deps
-uv pip install --python ~/env_isaaclab/bin/python --no-deps "rerun-sdk>=0.24.0,<0.27.0"
-
-# ZMQ client for the GR00T server
-uv pip install --python ~/env_isaaclab/bin/python pyzmq
-
-# RealSense backend — needed for the REAL robot (lerobot-record / lerobot-teleoperate with cameras)
-uv pip install --python ~/env_isaaclab/bin/python pyrealsense2
+uv pip install --no-deps "rerun-sdk>=0.24.0,<0.27.0"
+uv pip install pyzmq
+uv pip install "pyrealsense2>=2.55.1.6486,<2.57.0"
 ```
 
-- `numpy` / `torch` pinned so the resolver can't swap out Isaac's versions.
-- `feetech-servo-sdk` is a LeRobot *extra*, so Step 3's `--no-deps` skips it — but `so101_leader` /
-  `so101_follower` need it.
-- `pyrealsense2` has no dependencies of its own, so it can't disturb Isaac's pins.
-
-## Step 5 — Workshop package
+## Step 3 — Workshop package
 
 ```bash
-uv pip install --python ~/env_isaaclab/bin/python \
-    -e ~/sim2real/Sim-to-Real-SO-101-Workshop/source/sim_to_real_so101/
+uv pip install -e ~/sim2real/Sim-to-Real-SO-101-Workshop/source/sim_to_real_so101/
 ```
 
-## Step 6 — GR00T client slice (for real-robot eval)
-
-The real-robot eval **client** (`eval_so101_dual.py`) needs `lerobot` *and* a thin slice of
-`gr00t` (`PolicyClient`, which only imports numpy/msgpack/zmq — never torch). The **server** stays
-in Isaac-GR00T's own 3.12 `.venv`; only the client lives here.
+## Step 4 — Isaac-GR00T client slice
 
 ```bash
-# uv refuses this (gr00t declares requires-python >=3.12,<3.13; this venv is 3.11),
-# so use pip, which has --ignore-requires-python. uv has no equivalent flag.
-~/env_isaaclab/bin/python -m pip install \
+pip install \
     --no-deps --ignore-requires-python --no-build-isolation \
     -e ~/sim2real/Isaac-GR00T
 ```
 
-- `--no-deps` is essential: gr00t pins `torch==2.9.0` / `transformers==4.57.3` and would wreck
-  Isaac's pins. The client half needs none of it.
-- The 3.12 requirement covers gr00t's training/model code, not the ZMQ client. Verified working
-  on 3.11 — but treat anything else in the package as unsupported here.
-- Undo with `~/env_isaaclab/bin/python -m pip uninstall -y gr00t`.
-
----
-
-## Verify
-
-Stop at the first failure.
+## Step 5 — Verify
 
 ```bash
 source ~/env_isaaclab/bin/activate
 
-# numpy MUST still be 1.26.0
-python -c "import numpy, torch; print(numpy.__version__, torch.__version__)"
+python -c "
+import numpy, torch
+print(numpy.__version__, torch.__version__)
+assert numpy.__version__ == '1.26.0', numpy.__version__
+assert torch.__version__.endswith('+cu128'), 'torch is not the cu128 build — rerun ./isaaclab.sh --install'
+assert 'sm_120' in torch.cuda.get_arch_list(), torch.cuda.get_arch_list()
+print('cuda available:', torch.cuda.is_available())"
 
-# LeRobot import paths match utils/lerobot_interface.py
 python -c "
 from lerobot.teleoperators.so101_leader import SO101LeaderConfig
 from lerobot.robots.so101_follower import SO101FollowerConfig
@@ -139,9 +110,13 @@ from lerobot.datasets.lerobot_dataset import LeRobotDataset
 from lerobot.datasets.dataset_tools import delete_episodes
 print('lerobot OK')"
 
+python -c "
+import torchcodec
+from torchcodec.decoders import VideoDecoder
+print('torchcodec OK')"
+
 python -c "from sim_to_real_so101.utils.lerobot_interface import LeRobotSO101Interface; print('bridge OK')"
 
-# real-robot side lives in this same venv now — these must import too
 python -c "
 import pyrealsense2
 from lerobot.cameras.realsense import RealSenseCameraConfig
@@ -151,8 +126,14 @@ from lerobot.scripts.lerobot_record import RecordConfig, DatasetRecordConfig
 from lerobot.scripts.lerobot_calibrate import CalibrateConfig
 print('real-robot OK')"
 
+python -c "
+from gr00t.eval._horizon_contract import *
+from gr00t.policy.server_client import PolicyClient
+print('gr00t client OK')"
+
 lerobot-calibrate --help >/dev/null && echo "console scripts OK"
 
-list_envs                                          # 12 envs; 6 Teleop- (single) + 6 Dual- (bimanual)
-zero_agent --task Lerobot-So101-Dual-Vials-To-Rack # scene loads, no hardware needed
+list_envs
+
+zero_agent --task Lerobot-So101-Dual-Vials-To-Rack --headless
 ```

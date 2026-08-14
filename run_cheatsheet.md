@@ -121,6 +121,15 @@ lerobot-replay \
   --dataset.repo_id=ChihHanShen/bimanual-so101-pickvials-real \
   --dataset.root=$DATASET_REAL \
   --dataset.episode=10 --dataset.fps=30
+
+lerobot-replay \
+  --robot.type=bi_so101_follower --robot.id=bimanual_so101_follower \
+  --robot.calibration_dir=$CALIB_FOLLOWER \
+  --robot.left_arm_port=/dev/ttyFollowerLeft \
+  --robot.right_arm_port=/dev/ttyFollowerRight \
+  --dataset.repo_id=ChihHanShen/bimanual-so101-pickvials-sim-10fps \
+  --dataset.root=/home/graphen/sim2real/Sim-to-Real-SO-101-Workshop/datasets/bimanual-so101-pickvials-sim-10fps \
+  --dataset.episode=0 --dataset.fps=10
 ```
 
 按鍵(pynput 全域監聽,**跟 sim 不一樣**):**→** 結束這集 / 略過等待 ·

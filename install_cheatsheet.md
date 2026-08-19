@@ -28,6 +28,20 @@ git checkout b0542fe2d
 ./isaaclab.sh --install
 ```
 
+<!--
+b0542fe2d 不能往回退:0.54.2 以前釘 flatdict==4.0.1,而 flatdict 4.0.1 在 PyPI
+只有 sdist,它的 setup.py `import pkg_resources` 卻沒宣告 build 依賴 —— uv 的
+build isolation 會抓最新 setuptools(>=84,pkg_resources 已移除)→ build 失敗 →
+source/isaaclab 這顆主套件整包裝不進去(而 ./isaaclab.sh --install 不會因此中止,
+其他子套件照裝,所以很難察覺)→ einops / transformers 跟著缺。
+b0542fe2d 放寬成 flatdict>=4.1.0,4.1.0 有 wheel,不用 build。
+-->
+
+```bash
+# source/isaaclab 那一輪必須看到 Installed,出現 "× Failed to build" 就是沒裝成。
+python -c "import isaaclab; print('isaaclab OK')"
+```
+
 ```bash
 # Step 1 必須帶進這三個,Step 2 的 lerobot 是 --no-deps 裝的,不會補:
 #   einops / transformers==4.57.6      ← isaaclab（source/isaaclab/setup.py）

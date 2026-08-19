@@ -1,6 +1,5 @@
 # 雙臂 SO-101 run cheatsheet(指令速查)
 
-**這份只有指令。** 每一步的原理、陷阱、出錯怎麼辦 → **[run_notes.md](run_notes.md)**;
 校準理論與維修後比對 → **[CALIBRATION.md](CALIBRATION.md)**。
 
 所有指令都是寫死的絕對路徑,單獨複製貼上就能跑,不依賴任何變數或當前目錄。
